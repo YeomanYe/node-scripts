@@ -5,6 +5,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { Command } from 'commander';
+import yaml from 'yaml';
 
 const execAsync = promisify(exec);
 
@@ -54,8 +55,23 @@ async function writeLog(message: string): Promise<void> {
 // 读取配置文件
 async function readConfig(): Promise<Config> {
   try {
-    const content = await fs.readFile(CONFIG_PATH, 'utf8');
-    return JSON.parse(content);
+    const ext = path.extname(CONFIG_PATH).toLowerCase();
+    
+    if (ext === '.json') {
+      // 读取JSON配置文件
+      const content = await fs.readFile(CONFIG_PATH, 'utf8');
+      return JSON.parse(content);
+    } else if (ext === '.yml' || ext === '.yaml') {
+      // 读取YAML配置文件
+      const content = await fs.readFile(CONFIG_PATH, 'utf8');
+      return yaml.parse(content) as Config;
+    } else if (ext === '.js' || ext === '.mjs') {
+      // 读取JS模块配置文件
+      const configModule = await import(CONFIG_PATH);
+      return configModule.default || configModule;
+    } else {
+      throw new Error(`Unsupported config file format: ${ext}`);
+    }
   } catch (error) {
     await writeLog(`Error reading config file: ${(error as Error).message}`);
     throw error;
@@ -65,12 +81,142 @@ async function readConfig(): Promise<Config> {
 // 更新配置文件
 async function updateConfig(config: Config): Promise<void> {
   try {
-    await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+    const ext = path.extname(CONFIG_PATH).toLowerCase();
+    
+    if (ext === '.json') {
+      await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+    } else if (ext === '.yml' || ext === '.yaml') {
+      await fs.writeFile(CONFIG_PATH, yaml.stringify(config), 'utf8');
+    } else if (ext === '.js' || ext === '.mjs') {
+      // 使用Babel更新JS配置文件
+      await updateJsConfig(config);
+    } else {
+      throw new Error(`Unsupported config file format for writing: ${ext}`);
+    }
+    
     await writeLog('Config file updated successfully');
   } catch (error) {
     await writeLog(`Error updating config file: ${(error as Error).message}`);
     throw error;
   }
+}
+
+// 更新JS配置文件
+async function updateJsConfig(config: Config): Promise<void> {
+  // 读取当前配置文件内容
+  const content = await fs.readFile(CONFIG_PATH, 'utf8');
+  
+  // 查找commands数组的开始位置
+  const commandsRegex = /(commands:\s*\[|"commands":\s*\[)/;
+  const commandsMatch = content.match(commandsRegex);
+  
+  if (!commandsMatch) {
+    await writeLog('Warning: commands array literal not found, skipping file update');
+    return;
+  }
+  
+  if (commandsMatch.index === undefined) {
+    await writeLog('Warning: Could not determine commands array position, skipping file update');
+    return;
+  }
+  
+  // 计算数组开始位置
+  const arrayStart = commandsMatch.index + commandsMatch[0].length - 1; // -1 to get the '[' character
+  
+  // 跳过数组开始处的空格
+  let i = arrayStart + 1;
+  while (i < content.length && /\s/.test(content[i])) {
+    i++;
+  }
+  
+  // 如果数组为空，直接返回
+  if (content[i] === ']') {
+    await writeLog('Warning: commands array is empty, skipping file update');
+    return;
+  }
+  
+  // 平衡括号匹配，找到第一个命令组的结束位置和数组结束位置
+  let balance = 0;
+  let firstItemEnd = -1;
+  let arrayEnd = -1;
+  let inString = false;
+  let quoteChar = '';
+  let escapeNext = false;
+  
+  for (; i < content.length; i++) {
+    const char = content[i];
+    
+    // 处理字符串
+    if (!escapeNext && (char === '"' || char === "'")) {
+      if (inString && char === quoteChar) {
+        inString = false;
+        quoteChar = '';
+      } else if (!inString) {
+        inString = true;
+        quoteChar = char;
+      }
+      escapeNext = false;
+      continue;
+    }
+    
+    // 处理转义字符
+    if (inString && char === '\\') {
+      escapeNext = !escapeNext;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '{') {
+        balance++;
+      } else if (char === '}') {
+        balance--;
+        if (balance === 0 && firstItemEnd === -1) {
+          // 找到第一个对象的结束位置
+          firstItemEnd = i;
+        }
+      } else if (char === '[') {
+        balance++;
+      } else if (char === ']') {
+        balance--;
+        if (balance === -1) {
+          // 找到数组结束位置
+          arrayEnd = i;
+          break;
+        }
+      }
+    }
+    
+    escapeNext = false;
+  }
+  
+  if (firstItemEnd === -1 || arrayEnd === -1) {
+    await writeLog('Warning: Invalid commands array structure, skipping file update');
+    return;
+  }
+  
+  // 查找下一个命令组的开始位置（跳过逗号和空格）
+  let nextItemStart = firstItemEnd + 1;
+  while (nextItemStart < arrayEnd && /[,\s\n\r]/.test(content[nextItemStart])) {
+    nextItemStart++;
+  }
+  
+  // 构建更新后的数组内容
+  const beforeArray = content.slice(0, arrayStart + 1); // 到'['字符
+  const arrayContent = content.slice(nextItemStart, arrayEnd); // 剩余的命令组
+  const afterArray = content.slice(arrayEnd); // 从']'到文件结束
+  
+  // 组合更新后的内容
+  let updatedContent = '';
+  if (nextItemStart < arrayEnd) {
+    // 有剩余命令组
+    updatedContent = beforeArray + ' ' + arrayContent + afterArray;
+  } else {
+    // 没有剩余命令组，数组变为空
+    updatedContent = beforeArray + ' ' + afterArray;
+  }
+  
+  // 写入更新后的内容
+  await fs.writeFile(CONFIG_PATH, updatedContent, 'utf8');
 }
 
 // 解析时间，返回分钟数
@@ -148,9 +294,13 @@ async function executeCommands(config: Config): Promise<boolean> {
   if (success) {
     await writeLog('Command group executed successfully');
     
-    // 更新配置文件，删除已执行的命令
-    commands.shift();
-    await updateConfig({ ...config, commands });
+    // 创建commands数组的副本，避免修改原始数组
+    const updatedCommands = [...commands];
+    // 从副本中删除第一个命令组
+    updatedCommands.shift();
+    
+    // 更新配置文件，使用修改后的副本
+    await updateConfig({ ...config, commands: updatedCommands });
     
     // 如果是once模式，不再执行其他命令组
     if (mode === 'once') {
@@ -224,7 +374,23 @@ async function executeNow(options: Options): Promise<void> {
   try {
     await writeLog('Execute now command triggered');
     const config = await readConfig();
-    await executeCommands(config);
+    const { time: targetTimes, mode } = config;
+    
+    // 检查是否匹配配置的时间
+    const currentMinutes = getCurrentTimeInMinutes();
+    const parsedTimes = targetTimes.map(parseTime).sort((a, b) => a - b);
+    const shouldExecuteNow = parsedTimes.includes(currentMinutes);
+    
+    if (shouldExecuteNow) {
+      await writeLog('Current time matches target time, executing commands');
+      await executeCommands(config);
+    } else {
+      await writeLog('Current time does not match any target time, skipping execution');
+      // 显示当前时间和目标时间，方便调试
+      const currentTimeStr = new Date().toLocaleTimeString();
+      await writeLog(`Current time: ${currentTimeStr}`);
+      await writeLog(`Target times: ${targetTimes.join(', ')}`);
+    }
   } catch (error) {
     await writeLog(`Error in execute now: ${(error as Error).message}`);
     process.exit(1);
