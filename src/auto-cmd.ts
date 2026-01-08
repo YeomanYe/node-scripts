@@ -88,7 +88,6 @@ async function updateConfig(config: Config): Promise<void> {
     } else if (ext === '.yml' || ext === '.yaml') {
       await fs.writeFile(CONFIG_PATH, yaml.stringify(config), 'utf8');
     } else if (ext === '.js' || ext === '.mjs') {
-      // 使用Babel更新JS配置文件
       await updateJsConfig(config);
     } else {
       throw new Error(`Unsupported config file format for writing: ${ext}`);
