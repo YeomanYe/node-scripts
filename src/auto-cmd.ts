@@ -246,6 +246,14 @@ function getNextExecutionTime(targetTimes: string[]): number {
   return (firstTimeTomorrow - currentMinutes) * 60 * 1000;
 }
 
+// 计算距离明天最早执行时间的毫秒数
+function getNextDayFirstTime(targetTimes: string[]): number {
+  const currentMinutes = getCurrentTimeInMinutes();
+  const parsedTimes = targetTimes.map(parseTime).sort((a, b) => a - b);
+  const firstTimeTomorrow = parsedTimes[0] + 24 * 60;
+  return (firstTimeTomorrow - currentMinutes) * 60 * 1000;
+}
+
 // 执行单个命令
 async function executeCommand(cmd: string, cwd: string): Promise<boolean> {
   try {
@@ -293,18 +301,21 @@ async function executeCommands(config: Config): Promise<boolean> {
   if (success) {
     await writeLog('Command group executed successfully');
     
-    // 创建commands数组的副本，避免修改原始数组
-    const updatedCommands = [...commands];
-    // 从副本中删除第一个命令组
-    updatedCommands.shift();
-    
-    // 更新配置文件，使用修改后的副本
-    await updateConfig({ ...config, commands: updatedCommands });
-    
-    // 如果是once模式，不再执行其他命令组
+    // 对于once模式，删除第一个命令组
     if (mode === 'once') {
+      // 创建commands数组的副本，避免修改原始数组
+      const updatedCommands = [...commands];
+      // 从副本中删除第一个命令组
+      updatedCommands.shift();
+      
+      // 更新配置文件，使用修改后的副本
+      await updateConfig({ ...config, commands: updatedCommands });
+      
       await writeLog('Mode is once, stopping execution for today');
       return true;
+    } else {
+      // 对于repeat模式，保留所有命令组
+      await writeLog('Mode is repeat, will execute same commands at next time');
     }
   } else {
     await writeLog('Command group execution failed');
@@ -339,6 +350,11 @@ async function run(options: Options): Promise<void> {
       await writeLog('Current time matches target time, executing commands');
       const executed = await executeCommands(config);
       if (executed && mode === 'once') {
+        const newConfig = await readConfig();
+        const nextDayTime = getNextDayFirstTime(newConfig.time);
+        setTimeout(async () => {
+          await run(options);
+        }, nextDayTime);
         return;
       }
     }
@@ -352,6 +368,23 @@ async function run(options: Options): Promise<void> {
       await writeLog('Timer triggered, executing commands');
       const newConfig = await readConfig();
       await executeCommands(newConfig);
+      
+      // 递归调用run函数，继续等待下一次执行
+      if (mode === 'once') {
+        await writeLog('Once mode: completed, scheduling next day execution');
+        // 计算明天最早的执行时间
+        const nextDayTime = getNextDayFirstTime(newConfig.time);
+        setTimeout(async () => {
+          await run(options);
+        }, nextDayTime);
+      } else {
+        // Repeat模式：继续等待下一个时间点的执行
+        await writeLog('Repeat mode: completed, scheduling next execution');
+        const nextExecutionTime = getNextExecutionTime(newConfig.time);
+        setTimeout(async () => {
+          await run(options);
+        }, nextExecutionTime);
+      }
     }, nextExecutionTime);
     
   } catch (error) {
@@ -383,6 +416,24 @@ async function executeNow(options: Options): Promise<void> {
     if (shouldExecuteNow) {
       await writeLog('Current time matches target time, executing commands');
       await executeCommands(config);
+      
+      // 执行后安排下一次执行时间
+      await writeLog('Execute now completed, scheduling next execution');
+      if (mode === 'once') {
+        // Once模式：安排明天最早的执行时间
+        const nextDayTime = getNextDayFirstTime(config.time);
+        await writeLog(`Scheduling next day execution in ${nextDayTime / 1000 / 60} minutes`);
+        setTimeout(async () => {
+          await run(options);
+        }, nextDayTime);
+      } else {
+        // Repeat模式：安排下一个执行时间
+        const nextExecutionTime = getNextExecutionTime(config.time);
+        await writeLog(`Scheduling next execution in ${nextExecutionTime / 1000 / 60} minutes`);
+        setTimeout(async () => {
+          await run(options);
+        }, nextExecutionTime);
+      }
     } else {
       await writeLog('Current time does not match any target time, skipping execution');
       // 显示当前时间和目标时间，方便调试
