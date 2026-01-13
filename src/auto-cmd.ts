@@ -254,6 +254,75 @@ function getNextDayFirstTime(targetTimes: string[]): number {
   return (firstTimeTomorrow - currentMinutes) * 60 * 1000;
 }
 
+// 状态管理相关函数
+
+// 获取状态文件路径
+function getStateFilePath(): string {
+  return path.join(process.cwd(), 'local', 'auto-cmd-state.json');
+}
+
+// 确保状态文件目录存在
+async function ensureStateDir(): Promise<void> {
+  const stateDir = path.dirname(getStateFilePath());
+  try {
+    await fs.access(stateDir);
+  } catch {
+    await fs.mkdir(stateDir, { recursive: true });
+  }
+}
+
+// 执行状态接口
+interface ExecutionState {
+  lastExecutedDate: string; // YYYY-MM-DD格式
+  executed: boolean;
+}
+
+// 读取执行状态
+async function readExecutionState(): Promise<ExecutionState> {
+  await ensureStateDir();
+  const statePath = getStateFilePath();
+  
+  try {
+    const content = await fs.readFile(statePath, 'utf8');
+    return JSON.parse(content);
+  } catch {
+    // 如果文件不存在或解析失败，返回默认状态
+    return {
+      lastExecutedDate: '',
+      executed: false
+    };
+  }
+}
+
+// 写入执行状态
+async function writeExecutionState(state: ExecutionState): Promise<void> {
+  await ensureStateDir();
+  const statePath = getStateFilePath();
+  await fs.writeFile(statePath, JSON.stringify(state, null, 2), 'utf8');
+}
+
+// 获取今天的日期字符串 (YYYY-MM-DD)
+function getTodayDateString(): string {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+}
+
+// 检查今天是否已经执行过
+async function isExecutedToday(): Promise<boolean> {
+  const state = await readExecutionState();
+  const today = getTodayDateString();
+  return state.lastExecutedDate === today && state.executed;
+}
+
+// 更新执行状态为今天已执行
+async function updateExecutionState(executed: boolean): Promise<void> {
+  const today = getTodayDateString();
+  await writeExecutionState({ 
+    lastExecutedDate: today, 
+    executed 
+  });
+}
+
 // 执行单个命令
 async function executeCommand(cmd: string, cwd: string): Promise<boolean> {
   try {
@@ -341,15 +410,33 @@ async function run(options: Options): Promise<void> {
     const config = await readConfig();
     const { time: targetTimes, mode } = config;
     
+    // 检查今天是否已经执行过（仅对once模式有效）
+    let hasExecutedToday = false;
+    if (mode === 'once') {
+      hasExecutedToday = await isExecutedToday();
+      if (hasExecutedToday) {
+        await writeLog('Once mode: already executed today, will wait for next day');
+        // 直接计算明天的执行时间
+        const nextDayTime = getNextDayFirstTime(targetTimes);
+        await writeLog(`Next execution in ${nextDayTime / 1000 / 60} minutes`);
+        setTimeout(async () => {
+          await run(options);
+        }, nextDayTime);
+        return;
+      }
+    }
+    
     // 检查是否需要立即执行
     const currentMinutes = getCurrentTimeInMinutes();
     const parsedTimes = targetTimes.map(parseTime).sort((a, b) => a - b);
     const shouldExecuteNow = parsedTimes.includes(currentMinutes);
     
-    if (shouldExecuteNow) {
+    if (shouldExecuteNow && !hasExecutedToday) {
       await writeLog('Current time matches target time, executing commands');
       const executed = await executeCommands(config);
       if (executed && mode === 'once') {
+        // 更新执行状态为已执行
+        await updateExecutionState(true);
         const newConfig = await readConfig();
         const nextDayTime = getNextDayFirstTime(newConfig.time);
         setTimeout(async () => {
@@ -367,7 +454,29 @@ async function run(options: Options): Promise<void> {
     setTimeout(async () => {
       await writeLog('Timer triggered, executing commands');
       const newConfig = await readConfig();
-      await executeCommands(newConfig);
+      const { mode } = newConfig;
+      
+      // 检查今天是否已经执行过（仅对once模式有效）
+      let hasExecutedToday = false;
+      if (mode === 'once') {
+        hasExecutedToday = await isExecutedToday();
+        if (hasExecutedToday) {
+          await writeLog('Once mode: already executed today, will wait for next day');
+          // 直接安排明天的执行时间
+          const nextDayTime = getNextDayFirstTime(newConfig.time);
+          setTimeout(async () => {
+            await run(options);
+          }, nextDayTime);
+          return;
+        }
+      }
+      
+      const executed = await executeCommands(newConfig);
+      
+      if (executed && mode === 'once') {
+        // 更新执行状态为已执行
+        await updateExecutionState(true);
+      }
       
       // 递归调用run函数，继续等待下一次执行
       if (mode === 'once') {
@@ -408,14 +517,29 @@ async function executeNow(options: Options): Promise<void> {
     const config = await readConfig();
     const { time: targetTimes, mode } = config;
     
+    // 检查今天是否已经执行过（仅对once模式有效）
+    let hasExecutedToday = false;
+    if (mode === 'once') {
+      hasExecutedToday = await isExecutedToday();
+      if (hasExecutedToday) {
+        await writeLog('Once mode: already executed today, skipping execution');
+        return;
+      }
+    }
+    
     // 检查是否匹配配置的时间
     const currentMinutes = getCurrentTimeInMinutes();
     const parsedTimes = targetTimes.map(parseTime).sort((a, b) => a - b);
     const shouldExecuteNow = parsedTimes.includes(currentMinutes);
     
-    if (shouldExecuteNow) {
+    if (shouldExecuteNow && !hasExecutedToday) {
       await writeLog('Current time matches target time, executing commands');
-      await executeCommands(config);
+      const executed = await executeCommands(config);
+      
+      if (executed && mode === 'once') {
+        // 更新执行状态为已执行
+        await updateExecutionState(true);
+      }
       
       // 执行后安排下一次执行时间
       await writeLog('Execute now completed, scheduling next execution');
@@ -434,6 +558,8 @@ async function executeNow(options: Options): Promise<void> {
           await run(options);
         }, nextExecutionTime);
       }
+    } else if (hasExecutedToday) {
+      await writeLog('Once mode: already executed today, skipping execution');
     } else {
       await writeLog('Current time does not match any target time, skipping execution');
       // 显示当前时间和目标时间，方便调试
