@@ -73,6 +73,7 @@ node dist/auto-cmd.js [command] [options]
 {
   "time": ["10:00", "15:00", "20:00"],
   "mode": "once",
+  "count": "2",
   "commands": [
     {
       "path": "/path/to/directory",
@@ -93,6 +94,7 @@ time:
   - '15:00'
   - '20:00'
 mode: 'repeat'
+count: '1-3'
 commands:
   - path: /path/to/directory
     cmds:
@@ -110,6 +112,7 @@ const getTime = () => ['10:00', '15:00'];
 export default {
   time: getTime(),
   mode: 'once',
+  count: '3',
   commands: [
     {
       path: basePath,
@@ -150,6 +153,7 @@ node dist/auto-cmd.js execute --config config.json
 |------|------|------|
 | `time` | 字符串数组 | 指定执行时间，格式为 "HH:MM" |
 | `mode` | 字符串 | 执行模式，可选值："once"（单次执行）或 "repeat"（重复执行） |
+| `count` | 字符串 | 每次执行的命令数，支持两种格式：<br>- `n`：表示一次执行n条命令（从第1条开始）<br>- `m-n`：表示一次执行区间为m-n的命令 |
 | `commands` | 对象数组 | 命令组列表 |
 | `commands[].path` | 字符串 | 执行命令的工作目录 |
 | `commands[].cmds` | 字符串数组 | 要执行的命令列表 |

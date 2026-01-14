@@ -19,6 +19,7 @@ interface Config {
   time: string[];
   mode: 'once' | 'repeat';
   commands: CommandGroup[];
+  count?: string; // 每次执行的命令数，支持 "n" 或 "m-n" 格式
 }
 
 interface Options {
@@ -134,9 +135,10 @@ async function updateJsConfig(config: Config): Promise<void> {
     return;
   }
   
-  // 平衡括号匹配，找到第一个命令组的结束位置和数组结束位置
+  // 平衡括号匹配，找到所有命令组的位置
   let balance = 0;
-  let firstItemEnd = -1;
+  let commandGroups = [];
+  let currentGroupStart = i;
   let arrayEnd = -1;
   let inString = false;
   let quoteChar = '';
@@ -169,9 +171,17 @@ async function updateJsConfig(config: Config): Promise<void> {
         balance++;
       } else if (char === '}') {
         balance--;
-        if (balance === 0 && firstItemEnd === -1) {
-          // 找到第一个对象的结束位置
-          firstItemEnd = i;
+        if (balance === 0) {
+          // 找到一个命令组的结束位置
+          commandGroups.push({ start: currentGroupStart, end: i });
+          // 查找下一个命令组的开始位置
+          let nextStart = i + 1;
+          while (nextStart < content.length && /[,\s\n\r]/.test(content[nextStart])) {
+            nextStart++;
+          }
+          if (nextStart < content.length && content[nextStart] === '{') {
+            currentGroupStart = nextStart;
+          }
         }
       } else if (char === '[') {
         balance++;
@@ -188,15 +198,27 @@ async function updateJsConfig(config: Config): Promise<void> {
     escapeNext = false;
   }
   
-  if (firstItemEnd === -1 || arrayEnd === -1) {
+  if (arrayEnd === -1) {
     await writeLog('Warning: Invalid commands array structure, skipping file update');
     return;
   }
   
-  // 查找下一个命令组的开始位置（跳过逗号和空格）
-  let nextItemStart = firstItemEnd + 1;
-  while (nextItemStart < arrayEnd && /[,\s\n\r]/.test(content[nextItemStart])) {
-    nextItemStart++;
+  // 对于once模式，删除已执行的命令组
+  // 计算删除后的起始位置
+  let nextItemStart = arrayStart + 1;
+  // 解析count参数，确定要删除的命令数量
+  const { min, max } = parseCount(config.count);
+  // 随机决定要删除的命令数量
+  const randomCount = Math.floor(Math.random() * (max - min + 1)) + min;
+  const removeCount = Math.min(randomCount, commandGroups.length);
+  
+  if (commandGroups.length > removeCount) {
+    // 找到要保留的第一个命令组的开始位置
+    const firstGroupToKeep = commandGroups[removeCount];
+    nextItemStart = firstGroupToKeep.start;
+  } else {
+    // 删除所有命令组，数组变为空
+    nextItemStart = arrayEnd;
   }
   
   // 构建更新后的数组内容
@@ -356,26 +378,89 @@ async function executeCommandGroup(group: CommandGroup): Promise<boolean> {
 }
 
 // 执行命令
+// 解析count参数，返回要执行的命令数量范围
+function parseCount(count?: string): { min: number; max: number } {
+  if (!count) {
+    return { min: 1, max: 1 }; // 默认只执行1条
+  }
+  
+  // 检查是否是范围格式 "m-n"
+  if (count.includes('-')) {
+    const [min, max] = count.split('-').map(Number);
+    return { 
+      min: Math.max(1, min), // 最少执行1条
+      max: Math.max(min, max) // 确保max >= min
+    };
+  }
+  
+  // 单个数字格式 "n"
+  const n = Number(count);
+  return { min: Math.max(1, n), max: Math.max(1, n) };
+}
+
+// 从数组中随机选择指定数量的元素，并按原始顺序返回
+function getRandomElements<T>(array: T[], min: number, max: number): { elements: T[]; indices: number[] } {
+  // 创建索引数组并洗牌
+  const indices = Array.from({ length: array.length }, (_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  
+  // 确定要选择的元素数量
+  const count = Math.floor(Math.random() * (max - min + 1)) + min;
+  const actualCount = Math.min(count, array.length);
+  
+  // 选择前actualCount个索引并按原始顺序排序
+  const selectedIndices = indices.slice(0, actualCount).sort((a, b) => a - b);
+  
+  // 根据排序后的索引获取元素
+  const selectedElements = selectedIndices.map(index => array[index]);
+  
+  return {
+    elements: selectedElements,
+    indices: selectedIndices
+  };
+}
+
 async function executeCommands(config: Config): Promise<boolean> {
-  let { commands, mode } = config;
+  let { commands, mode, count } = config;
   
   if (commands.length === 0) {
     await writeLog('No commands to execute');
     return false;
   }
   
-  // 执行第一个命令组
-  const success = await executeCommandGroup(commands[0]);
+  // 解析count参数
+  const { min, max } = parseCount(count);
   
-  if (success) {
-    await writeLog('Command group executed successfully');
+  // 随机决定要执行的命令数量
+  const randomCount = Math.floor(Math.random() * (max - min + 1)) + min;
+  const executeCount = Math.min(randomCount, commands.length);
+  
+  await writeLog(`Randomly selected to execute ${executeCount} command groups`);
+  await writeLog(`Will execute command groups 1 to ${executeCount}`);
+  
+  // 按顺序执行命令组
+  let allSuccess = true;
+  for (let i = 0; i < executeCount; i++) {
+    await writeLog(`Executing command group ${i + 1}`);
+    const success = await executeCommandGroup(commands[i]);
+    if (!success) {
+      allSuccess = false;
+      break;
+    }
+  }
+  
+  if (allSuccess) {
+    await writeLog('Command groups executed successfully');
     
-    // 对于once模式，删除第一个命令组
+    // 对于once模式，删除已执行的命令组
     if (mode === 'once') {
       // 创建commands数组的副本，避免修改原始数组
       const updatedCommands = [...commands];
-      // 从副本中删除第一个命令组
-      updatedCommands.shift();
+      // 删除已执行的命令组
+      updatedCommands.splice(0, executeCount);
       
       // 更新配置文件，使用修改后的副本
       await updateConfig({ ...config, commands: updatedCommands });
