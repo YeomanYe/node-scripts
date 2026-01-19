@@ -119,12 +119,30 @@ export async function executeCommands(config: Config): Promise<boolean> {
   if (allSuccess) {
     await writeLog('Command groups executed successfully');
     
-    // 对于once模式，删除已执行的命令组
+    // 对于once模式，处理已执行的命令组
     if (mode === 'once') {
       // 创建commands数组的副本，避免修改原始数组
       const updatedCommands = [...commands];
-      // 删除已执行的命令组
-      updatedCommands.splice(0, executeCount);
+      
+      // 处理前executeCount个命令组，考虑删除后的索引变化
+      let processed = 0;
+      let i = 0;
+      
+      while (processed < executeCount && i < updatedCommands.length) {
+        const commandGroup = updatedCommands[i];
+        
+        if (commandGroup.count && commandGroup.count > 1) {
+          // 如果count大于1，减少count值，不删除命令组
+          commandGroup.count -= 1;
+          processed++;
+          i++;
+        } else {
+          // 否则删除命令组
+          updatedCommands.splice(i, 1);
+          processed++;
+          // 索引不需要增加，因为删除后下一个元素会移动到当前位置
+        }
+      }
       
       // 更新配置文件，使用修改后的副本
       await updateConfig({ ...config, commands: updatedCommands });

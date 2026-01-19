@@ -2,6 +2,7 @@
 export interface CommandGroup {
   path: string;
   cmds: string[];
+  count?: number;
 }
 
 export interface Config {
