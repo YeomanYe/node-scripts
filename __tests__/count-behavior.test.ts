@@ -44,7 +44,7 @@ describe('count behavior in executeCommands', () => {
         cmds: ['ls -la'],
         count: 4
       }]
-    });
+    }, 1);
   });
 
   it('should delete command when count === 1 and mode is once', async () => {
@@ -64,7 +64,7 @@ describe('count behavior in executeCommands', () => {
     expect(updateConfig).toHaveBeenCalledWith({
       ...config,
       commands: []
-    });
+    }, 1);
   });
 
   it('should delete command when count is undefined and mode is once', async () => {
@@ -83,7 +83,7 @@ describe('count behavior in executeCommands', () => {
     expect(updateConfig).toHaveBeenCalledWith({
       ...config,
       commands: []
-    });
+    }, 1);
   });
 
   it('should handle multiple command groups with different counts', async () => {
@@ -130,6 +130,6 @@ describe('count behavior in executeCommands', () => {
           cmds: ['pwd']
         }
       ]
-    });
+    }, 2);
   });
 });

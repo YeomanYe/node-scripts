@@ -144,8 +144,8 @@ export async function executeCommands(config: Config): Promise<boolean> {
         }
       }
       
-      // 更新配置文件，使用修改后的副本
-      await updateConfig({ ...config, commands: updatedCommands });
+      // 更新配置文件，使用修改后的副本和执行数量
+      await updateConfig({ ...config, commands: updatedCommands }, executeCount);
       
       await writeLog('Mode is once, stopping execution for today');
       return true;

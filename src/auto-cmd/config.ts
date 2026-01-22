@@ -44,7 +44,7 @@ export async function readConfig(): Promise<Config> {
 }
 
 // 更新配置文件
-export async function updateConfig(config: Config): Promise<void> {
+export async function updateConfig(config: Config, executeCount: number = 0): Promise<void> {
   try {
     const ext = path.extname(CONFIG_PATH).toLowerCase();
     
@@ -53,7 +53,7 @@ export async function updateConfig(config: Config): Promise<void> {
     } else if (ext === '.yml' || ext === '.yaml') {
       await fs.writeFile(CONFIG_PATH, yaml.stringify(config), 'utf8');
     } else if (ext === '.js' || ext === '.mjs') {
-      await updateJsConfig(config);
+      await updateJsConfig(config, executeCount);
     } else {
       throw new Error(`Unsupported config file format for writing: ${ext}`);
     }
@@ -66,7 +66,7 @@ export async function updateConfig(config: Config): Promise<void> {
 }
 
 // 更新JS配置文件
-export async function updateJsConfig(config: Config): Promise<void> {
+export async function updateJsConfig(config: Config, executeCount: number): Promise<void> {
   // 读取当前配置文件内容
   const content = await fs.readFile(CONFIG_PATH, 'utf8');
   
@@ -170,11 +170,8 @@ export async function updateJsConfig(config: Config): Promise<void> {
   // 对于once模式，删除已执行的命令组
   // 计算删除后的起始位置
   let nextItemStart = arrayStart + 1;
-  // 解析count参数，确定要删除的命令数量
-  const { min, max } = parseCount(config.count);
-  // 随机决定要删除的命令数量
-  const randomCount = Math.floor(Math.random() * (max - min + 1)) + min;
-  const removeCount = Math.min(randomCount, commandGroups.length);
+  // 使用传入的executeCount作为删除数量
+  const removeCount = Math.min(executeCount, commandGroups.length);
   
   if (commandGroups.length > removeCount) {
     // 找到要保留的第一个命令组的开始位置
@@ -202,24 +199,4 @@ export async function updateJsConfig(config: Config): Promise<void> {
   
   // 写入更新后的内容
   await fs.writeFile(CONFIG_PATH, updatedContent, 'utf8');
-}
-
-// 解析count参数，返回要执行的命令数量范围
-function parseCount(count?: string): { min: number; max: number } {
-  if (!count) {
-    return { min: 1, max: 1 }; // 默认只执行1条
-  }
-  
-  // 检查是否是范围格式 "m-n"
-  if (count.includes('-')) {
-    const [min, max] = count.split('-').map(Number);
-    return { 
-      min: Math.max(1, min), // 最少执行1条
-      max: Math.max(min, max) // 确保max >= min
-    };
-  }
-  
-  // 单个数字格式 "n"
-  const n = Number(count);
-  return { min: Math.max(1, n), max: Math.max(1, n) };
 }
