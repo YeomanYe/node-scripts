@@ -3,6 +3,7 @@ import path from 'path';
 import yaml from 'yaml';
 import { Config } from './types';
 import { writeLog } from './log';
+import { setLockPath, waitForLock, releaseLock } from './config-lock';
 
 // 配置文件路径
 let CONFIG_PATH = path.join(process.cwd(), 'local/auto-cmd-config.json');
@@ -10,6 +11,8 @@ let CONFIG_PATH = path.join(process.cwd(), 'local/auto-cmd-config.json');
 // 设置配置文件路径
 export function setConfigPath(configPath: string): void {
   CONFIG_PATH = path.resolve(configPath);
+  // 设置锁文件路径
+  setLockPath(CONFIG_PATH);
 }
 
 // 获取配置文件路径
@@ -17,43 +20,110 @@ export function getConfigPath(): string {
   return CONFIG_PATH;
 }
 
+// 初始化锁文件路径
+setLockPath(CONFIG_PATH);
+
 // 读取配置文件
 export async function readConfig(): Promise<Config> {
+  // 获取配置文件锁
+  const acquired = await waitForLock();
+  if (!acquired) {
+    await writeLog('Failed to acquire lock for reading config file, retrying...');
+    // 重试读取
+    return readConfig();
+  }
+  
   try {
+    // 检查文件是否存在且不为空
+    const stats = await fs.stat(CONFIG_PATH);
+    if (stats.size === 0) {
+      throw new Error('Config file is empty, using default config');
+    }
+    
     const ext = path.extname(CONFIG_PATH).toLowerCase();
     
+    let config: Config;
     if (ext === '.json') {
       // 读取JSON配置文件
       const content = await fs.readFile(CONFIG_PATH, 'utf8');
-      return JSON.parse(content);
+      config = JSON.parse(content);
     } else if (ext === '.yml' || ext === '.yaml') {
       // 读取YAML配置文件
       const content = await fs.readFile(CONFIG_PATH, 'utf8');
-      return yaml.parse(content) as Config;
+      config = yaml.parse(content) as Config;
     } else if (ext === '.js' || ext === '.mjs') {
       // 读取JS模块配置文件
       const configModule = await import(CONFIG_PATH);
-      return configModule.default || configModule;
+      config = configModule.default || configModule;
     } else {
       throw new Error(`Unsupported config file format: ${ext}`);
     }
+    
+    return config;
   } catch (error) {
+    // 先释放锁，避免死锁
+    await releaseLock();
+    
     await writeLog(`Error reading config file: ${(error as Error).message}`);
-    throw error;
+    // 如果配置文件不存在或为空，返回默认配置
+    const defaultConfig: Config = {
+      time: ['9:30', '12:30', '19:00', '23:00'],
+      mode: 'once',
+      commands: []
+    };
+    // 写回默认配置，防止配置文件继续为空
+    await updateConfig(defaultConfig);
+    return defaultConfig;
+  } finally {
+    // 释放锁
+    await releaseLock();
   }
 }
 
 // 更新配置文件
 export async function updateConfig(config: Config, executeCount: number = 0): Promise<void> {
+  // 获取配置文件锁
+  const acquired = await waitForLock();
+  if (!acquired) {
+    await writeLog('Failed to acquire lock for updating config file, retrying...');
+    // 重试更新
+    return updateConfig(config, executeCount);
+  }
+  
   try {
     const ext = path.extname(CONFIG_PATH).toLowerCase();
     
+    // 确保配置文件不会被完全清空，保留基本结构
+    const safeConfig = {
+      ...config,
+      // 确保time数组存在
+      time: config.time || ['9:30', '12:30', '19:00', '23:00'],
+      // 确保mode存在
+      mode: config.mode || 'once',
+      // 确保commands数组存在
+      commands: config.commands || []
+    };
+    
     if (ext === '.json') {
-      await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+      // 写入JSON配置文件
+      const jsonContent = JSON.stringify(safeConfig, null, 2);
+      // 确保写入的内容不为空
+      if (jsonContent.trim() === '{}') {
+        await writeLog('Warning: Attempting to write empty config, using default config instead');
+        const defaultConfig: Config = {
+          time: ['9:30', '12:30', '19:00', '23:00'],
+          mode: 'once',
+          commands: []
+        };
+        await fs.writeFile(CONFIG_PATH, JSON.stringify(defaultConfig, null, 2), 'utf8');
+      } else {
+        await fs.writeFile(CONFIG_PATH, jsonContent, 'utf8');
+      }
     } else if (ext === '.yml' || ext === '.yaml') {
-      await fs.writeFile(CONFIG_PATH, yaml.stringify(config), 'utf8');
+      // 写入YAML配置文件
+      await fs.writeFile(CONFIG_PATH, yaml.stringify(safeConfig), 'utf8');
     } else if (ext === '.js' || ext === '.mjs') {
-      await updateJsConfig(config, executeCount);
+      await updateJsConfig(safeConfig, executeCount);
     } else {
       throw new Error(`Unsupported config file format for writing: ${ext}`);
     }
@@ -62,6 +132,9 @@ export async function updateConfig(config: Config, executeCount: number = 0): Pr
   } catch (error) {
     await writeLog(`Error updating config file: ${(error as Error).message}`);
     throw error;
+  } finally {
+    // 释放锁
+    await releaseLock();
   }
 }
 
