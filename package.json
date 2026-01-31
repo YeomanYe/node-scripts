@@ -2,16 +2,15 @@
   "name": "auto-cmd",
   "version": "1.0.0",
   "description": "Automated command execution scheduler",
-  "type": "module",
-  "main": "dist/auto-cmd.js",
+  "main": "dist/auto-cmd/index.js",
   "bin": {
-    "auto-cmd": "dist/auto-cmd.js"
+    "auto-cmd": "dist/auto-cmd/index.js"
   },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "start": "node dist/auto-cmd.js",
-    "execute": "node dist/auto-cmd.js execute",
+    "start": "node dist/auto-cmd/index.js",
+    "execute": "node dist/auto-cmd/index.js execute",
     "test": "jest"
   },
   "keywords": [
