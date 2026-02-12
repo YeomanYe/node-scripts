@@ -10,11 +10,11 @@ export interface Config {
   mode: 'once' | 'repeat';
   commands: CommandGroup[];
   count?: string; // 每次执行的命令数，支持 "n" 或 "m-n" 格式
+  wait?: number | string; // 命令执行间隔时间，单位秒，支持数字或 "m-n" 格式
 }
 
 export interface Options {
   config?: string;
-  logDir?: string;
 }
 
 export interface ExecutionState {

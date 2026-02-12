@@ -9,10 +9,6 @@ jest.mock('../src/auto-cmd/executor', () => ({
   executeCommands: jest.requireActual('../src/auto-cmd/executor').executeCommands,
 }));
 
-jest.mock('../src/auto-cmd/log', () => ({
-  writeLog: jest.fn()
-}));
-
 jest.mock('../src/auto-cmd/config', () => ({
   updateConfig: jest.fn()
 }));

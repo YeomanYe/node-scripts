@@ -157,6 +157,44 @@ node dist/auto-cmd.js execute --config config.json
 | `commands` | 对象数组 | 命令组列表 |
 | `commands[].path` | 字符串 | 执行命令的工作目录 |
 | `commands[].cmds` | 字符串数组 | 要执行的命令列表 |
+| `commands[].count` | 数字（可选） | 命令组执行次数：<br>- 每次执行后 count 减 1<br>- count 变为 0 时保留命令（不再执行）<br>- 无此参数时执行后立即删除 |
+
+## 命令组 count 行为说明
+
+当命令组设置了 `count` 参数时：
+
+- **count > 1**：每次执行后 count 减 1，命令保留
+- **count = 1**：执行后 count 变为 0，命令保留（下次不再执行）
+- **count = 0**：命令被跳过（不执行），但保留在配置中
+- **无 count 参数**：执行后立即删除
+
+```json
+{
+  "time": ["10:00"],
+  "mode": "once",
+  "commands": [
+    {
+      "path": "/project",
+      "cmds": ["npm run build"],
+      "count": 3
+    },
+    {
+      "path": "/project",
+      "cmds": ["npm run deploy"],
+      "count": 1
+    },
+    {
+      "path": "/project",
+      "cmds": ["npm run cleanup"]
+    }
+  ]
+}
+```
+
+上述配置中：
+- `npm run build` 执行 3 次后停止
+- `npm run deploy` 执行 1 次后 count 变为 0（保留但不再执行）
+- `npm run cleanup` 执行 1 次后删除
 
 ## 日志说明
 
