@@ -95,21 +95,29 @@ export async function executeCommands(config: Config): Promise<boolean> {
     return false;
   }
   
+  // 过滤掉count为0的命令，保留有count参数但count>=1的命令
+  const filteredCommands = commands.filter(cmd => cmd.count !== 0);
+
+  if (filteredCommands.length === 0) {
+    await writeLog('No commands to execute (all commands have count=0)');
+    return false;
+  }
+
   // 解析count参数
   const { min, max } = parseCount(count);
-  
+
   // 随机决定要执行的命令数量
   const randomCount = Math.floor(Math.random() * (max - min + 1)) + min;
-  const executeCount = Math.min(randomCount, commands.length);
-  
+  const executeCount = Math.min(randomCount, filteredCommands.length);
+
   await writeLog(`Randomly selected to execute ${executeCount} command groups`);
   await writeLog(`Will execute command groups 1 to ${executeCount}`);
-  
+
   // 按顺序执行命令组
   let allSuccess = true;
   for (let i = 0; i < executeCount; i++) {
     await writeLog(`Executing command group ${i + 1}`);
-    const success = await executeCommandGroup(commands[i]);
+    const success = await executeCommandGroup(filteredCommands[i]);
     if (!success) {
       allSuccess = false;
       break;
@@ -123,25 +131,41 @@ export async function executeCommands(config: Config): Promise<boolean> {
     if (mode === 'once') {
       // 创建commands数组的副本，避免修改原始数组
       const updatedCommands = [...commands];
-      
-      // 处理前executeCount个命令组，考虑删除后的索引变化
+
+      // 使用filteredCommands来遍历，只处理有效的命令（count !== 0）
       let processed = 0;
-      let i = 0;
-      
-      while (processed < executeCount && i < updatedCommands.length) {
-        const commandGroup = updatedCommands[i];
-        
-        if (commandGroup.count && commandGroup.count > 1) {
-          // 如果count大于1，减少count值，不删除命令组
-          commandGroup.count -= 1;
-          processed++;
-          i++;
-        } else {
-          // 否则删除命令组
-          updatedCommands.splice(i, 1);
-          processed++;
-          // 索引不需要增加，因为删除后下一个元素会移动到当前位置
+      let commandIndex = 0;
+      let filteredIndex = 0;
+
+      // 遍历filteredCommands，找到对应的命令并更新
+      while (processed < executeCount && filteredIndex < filteredCommands.length) {
+        // 找到updatedCommands中对应的命令（通过path和cmds匹配）
+        const targetCmd = filteredCommands[filteredIndex];
+
+        // 在updatedCommands中找到匹配的命令（从commandIndex开始）
+        while (commandIndex < updatedCommands.length) {
+          const commandGroup = updatedCommands[commandIndex];
+          if (commandGroup.path === targetCmd.path &&
+              JSON.stringify(commandGroup.cmds) === JSON.stringify(targetCmd.cmds)) {
+            // 找到匹配的命令
+            if (commandGroup.count !== undefined) {
+              if (commandGroup.count > 1) {
+                commandGroup.count -= 1;
+              } else {
+                commandGroup.count = 0;
+              }
+            } else {
+              // 没有count参数的命令，正常删除
+              updatedCommands.splice(commandIndex, 1);
+              // 不增加commandIndex，因为删除后下一个元素会移动到当前位置
+            }
+            break;
+          }
+          commandIndex++;
         }
+
+        processed++;
+        filteredIndex++;
       }
       
       // 更新配置文件，使用修改后的副本和执行数量
