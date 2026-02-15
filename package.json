@@ -2,7 +2,7 @@
   "name": "auto-cmd",
   "version": "1.0.0",
   "description": "Automated command execution scheduler",
-  "type": "module",
+  "type": "commonjs",
   "main": "dist/auto-cmd/index.js",
   "bin": {
     "auto-cmd": "dist/auto-cmd/index.js"

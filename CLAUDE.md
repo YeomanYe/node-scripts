@@ -51,3 +51,14 @@ src/auto-cmd/
 Supports two formats:
 - `"n"`: Execute n commands (starting from first)
 - `"m-n"`: Execute a range of commands
+
+## Behavioral Constraints
+
+- **NEVER modify or delete files in the `local/` directory** - This folder contains runtime data (config, state)
+- The `local/` folder stores auto-cmd-config.json and auto-cmd-state.json which are managed by the application
+
+## Development Workflow
+
+- **Always run tests after code changes** - Execute `pnpm test` to verify changes don't break existing functionality
+- **Update README for user-facing changes** - Document new features, configuration options, or behavioral changes
+- **Log error causes** - When encountering errors, document the root cause and solution to prevent recurrence

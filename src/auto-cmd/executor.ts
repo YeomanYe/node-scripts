@@ -1,25 +1,43 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { Config, CommandGroup } from './types';
 import { updateConfig } from './config';
+import { DEFAULT_COUNT, DEFAULT_WAIT } from './constants';
+import { defaultExecutor, CommandExecutor } from './command-executor';
 
-const execAsync = promisify(exec);
+// 命令执行器实例
+let executor: CommandExecutor = defaultExecutor;
 
-// 执行单个命令
-export async function executeCommand(cmd: string, cwd: string): Promise<boolean> {
-  try {
-    const { stdout, stderr } = await execAsync(cmd, { cwd });
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * 设置命令执行器（用于测试和替换）
+ * @param exec - 新的执行器实例
+ */
+export function setExecutor(exec: CommandExecutor): void {
+  executor = exec;
 }
 
-// 执行命令组
-export async function executeCommandGroup(group: CommandGroup, wait?: number | string): Promise<boolean> {
+/**
+ * 执行单个命令
+ * @param cmd - 要执行的命令
+ * @param cwd - 执行目录
+ * @returns 是否执行成功
+ */
+export async function executeCommand(cmd: string, cwd: string): Promise<boolean> {
+  const result = await executor.execute(cmd, cwd);
+  return result.success;
+}
+
+/**
+ * 执行命令组
+ * @param group - 命令组
+ * @param wait - 命令间等待时间（秒或范围）
+ * @returns 是否执行成功
+ */
+export async function executeCommandGroup(
+  group: CommandGroup,
+  wait?: number | string
+): Promise<boolean> {
   const { path: cwd, cmds } = group;
 
-  // 解析wait参数
+  // 解析 wait 参数
   const { min, max } = parseWait(wait);
 
   for (let i = 0; i < cmds.length; i++) {
@@ -31,7 +49,6 @@ export async function executeCommandGroup(group: CommandGroup, wait?: number | s
 
     // 如果还有下一条命令，则等待
     if (i < cmds.length - 1 && (min > 0 || max > 0)) {
-      // 如果min等于max，使用固定等待时间；否则随机选择
       const waitTime = min === max ? min : Math.floor(Math.random() * (max - min + 1)) + min;
       await sleep(waitTime);
     }
@@ -40,61 +57,59 @@ export async function executeCommandGroup(group: CommandGroup, wait?: number | s
   return true;
 }
 
-// 解析count参数，返回要执行的命令数量范围
+/**
+ * 解析 count 参数，返回要执行的命令数量范围
+ * @param count - count 字符串，格式为 "n" 或 "m-n"
+ * @returns {min, max} - 最小和最大执行数量
+ */
 export function parseCount(count?: string): { min: number; max: number } {
   if (!count) {
-    return { min: 1, max: 1 }; // 默认只执行1条
+    return DEFAULT_COUNT;
   }
 
   // 检查是否是范围格式 "m-n"
   if (count.includes('-')) {
-    // 尝试匹配范围格式
     const rangeMatch = count.match(/^(-?\d+)-(\d+)$/);
     if (!rangeMatch) {
-      return { min: 1, max: 1 };
+      return DEFAULT_COUNT;
     }
 
     const [, firstStr, secondStr] = rangeMatch;
     const first = Number(firstStr);
     const second = Number(secondStr);
 
-    // 处理无效数字
     if (isNaN(first) || isNaN(second)) {
-      return { min: 1, max: 1 };
+      return DEFAULT_COUNT;
     }
 
-    // 确保min是较小的值，max是较大的值
     let min = Math.min(first, second);
     let max = Math.max(first, second);
-
-    // 确保min至少为1
     min = Math.max(1, min);
 
-    return {
-      min: min,
-      max: max
-    };
+    return { min, max };
   }
 
   // 单个数字格式 "n"
   const n = Number(count);
-
-  // 处理无效数字
   if (isNaN(n)) {
-    return { min: 1, max: 1 };
+    return DEFAULT_COUNT;
   }
 
   const validN = Math.max(1, n);
   return { min: validN, max: validN };
 }
 
-// 解析wait参数，返回等待时间的范围（毫秒）
+/**
+ * 解析 wait 参数，返回等待时间的范围（毫秒）
+ * @param wait - 等待时间，数字或字符串格式
+ * @returns {min, max} - 最小和最大等待时间（毫秒）
+ */
 export function parseWait(wait?: number | string): { min: number; max: number } {
   if (wait === undefined || wait === null) {
-    return { min: 0, max: 0 }; // 默认不等待
+    return DEFAULT_WAIT;
   }
 
-  // 数字格式
+  // 数字格式（秒）
   if (typeof wait === 'number') {
     const seconds = Math.max(0, wait);
     const ms = Math.round(seconds * 1000);
@@ -107,7 +122,7 @@ export function parseWait(wait?: number | string): { min: number; max: number } 
     if (wait.includes('-')) {
       const rangeMatch = wait.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
       if (!rangeMatch) {
-        return { min: 0, max: 0 };
+        return DEFAULT_WAIT;
       }
 
       const [, minStr, maxStr] = rangeMatch;
@@ -115,7 +130,7 @@ export function parseWait(wait?: number | string): { min: number; max: number } 
       const max = Number(maxStr);
 
       if (isNaN(min) || isNaN(max) || min < 0 || max < 0) {
-        return { min: 0, max: 0 };
+        return DEFAULT_WAIT;
       }
 
       const minMs = Math.round(Math.min(min, max) * 1000);
@@ -127,37 +142,53 @@ export function parseWait(wait?: number | string): { min: number; max: number } 
     // 单个数字字符串格式
     const seconds = Number(wait);
     if (isNaN(seconds)) {
-      return { min: 0, max: 0 };
+      return DEFAULT_WAIT;
     }
 
     const ms = Math.round(Math.max(0, seconds) * 1000);
     return { min: ms, max: ms };
   }
 
-  return { min: 0, max: 0 };
+  return DEFAULT_WAIT;
 }
 
-// 等待指定时间（毫秒）
+/**
+ * 等待指定时间
+ * @param ms - 等待毫秒数
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// 执行命令
+/**
+ * 生成命令组的唯一标识符
+ * @param group - 命令组
+ * @returns 唯一标识符
+ */
+function getCommandGroupId(group: CommandGroup): string {
+  return `${group.path}::${group.cmds.join('|')}`;
+}
+
+/**
+ * 执行配置中的命令
+ * @param config - 配置对象
+ * @returns 是否全部执行成功
+ */
 export async function executeCommands(config: Config): Promise<boolean> {
-  let { commands, mode, count, wait } = config;
+  const { commands, mode, count, wait } = config;
 
   if (commands.length === 0) {
     return false;
   }
 
-  // 过滤掉count为0的命令，保留有count参数但count>=1的命令
+  // 过滤掉 count 为 0 的命令
   const filteredCommands = commands.filter(cmd => cmd.count !== 0);
 
   if (filteredCommands.length === 0) {
     return false;
   }
 
-  // 解析count参数
+  // 解析 count 参数
   const { min, max } = parseCount(count);
 
   // 随机决定要执行的命令数量
@@ -175,48 +206,30 @@ export async function executeCommands(config: Config): Promise<boolean> {
   }
 
   if (allSuccess) {
-    // 对于once模式，处理已执行的命令组
+    // 对于 once 模式，处理已执行的命令组
     if (mode === 'once') {
-      // 创建commands数组的副本，避免修改原始数组
-      const updatedCommands = [...commands];
+      // 创建命令组 ID 集合，用于快速查找
+      const executedIds = new Set(
+        filteredCommands.slice(0, executeCount).map(getCommandGroupId)
+      );
 
-      // 使用filteredCommands来遍历，只处理有效的命令（count !== 0）
-      let processed = 0;
-      let commandIndex = 0;
-      let filteredIndex = 0;
-
-      // 遍历filteredCommands，找到对应的命令并更新
-      while (processed < executeCount && filteredIndex < filteredCommands.length) {
-        // 找到updatedCommands中对应的命令（通过path和cmds匹配）
-        const targetCmd = filteredCommands[filteredIndex];
-
-        // 在updatedCommands中找到匹配的命令（从commandIndex开始）
-        while (commandIndex < updatedCommands.length) {
-          const commandGroup = updatedCommands[commandIndex];
-          if (commandGroup.path === targetCmd.path &&
-              JSON.stringify(commandGroup.cmds) === JSON.stringify(targetCmd.cmds)) {
-            // 找到匹配的命令
-            if (commandGroup.count !== undefined) {
-              if (commandGroup.count > 1) {
-                commandGroup.count -= 1;
-              } else {
-                commandGroup.count = 0;
-              }
+      // 更新命令组状态
+      const updatedCommands = commands.map(group => {
+        if (executedIds.has(getCommandGroupId(group))) {
+          if (group.count !== undefined) {
+            if (group.count > 1) {
+              return { ...group, count: group.count - 1 };
             } else {
-              // 没有count参数的命令，正常删除
-              updatedCommands.splice(commandIndex, 1);
-              // 不增加commandIndex，因为删除后下一个元素会移动到当前位置
+              return { ...group, count: 0 };
             }
-            break;
           }
-          commandIndex++;
+          // 没有 count 参数的命令，返回 undefined 以便后续过滤
+          return undefined;
         }
+        return group;
+      }).filter((cmd): cmd is CommandGroup => cmd !== undefined);
 
-        processed++;
-        filteredIndex++;
-      }
-
-      // 更新配置文件，使用修改后的副本和执行数量
+      // 更新配置文件
       await updateConfig({ ...config, commands: updatedCommands }, executeCount);
 
       return true;
