@@ -65,6 +65,102 @@ pnpm start -- --config config.yml
 pnpm execute -- --config config.json
 ```
 
+## Sync-Code（VSCode / Cursor / Trae 同步）
+
+`sync-editor` 用于三方双向同步以下内容：
+- `settings.json`
+- `keybindings.json`
+- `extensions.json`（扩展清单文件）
+
+当检测到冲突时，会生成冲突文件，用户编辑后再执行 `resolve`。
+
+### 准备 editors-config 文件
+
+创建一个 JSON 文件（例如 `local/sync-editor/editors-config.json`）：
+
+```json
+{
+  "vscode": {
+    "settings": "/path/to/vscode/settings.json",
+    "keybindings": "/path/to/vscode/keybindings.json",
+    "extensions": "/path/to/vscode/extensions.json"
+  },
+  "cursor": {
+    "settings": "/path/to/cursor/settings.json",
+    "keybindings": "/path/to/cursor/keybindings.json",
+    "extensions": "/path/to/cursor/extensions.json"
+  },
+  "trae": {
+    "settings": "/path/to/trae/settings.json",
+    "keybindings": "/path/to/trae/keybindings.json",
+    "extensions": "/path/to/trae/extensions.json"
+  }
+}
+```
+
+### 执行同步
+
+```bash
+pnpm run build
+node dist/sync-editor/index.js sync -c ./local/sync-editor/editors-config.json
+```
+
+### 自动生成 editors-config（推荐）
+
+```bash
+# 自动探测 code/cursor/trae 的 settings/keybindings 路径并生成 editors-config.json
+node dist/sync-editor/index.js init
+
+# 默认会自动导出扩展列表（调用 code/cursor/trae --list-extensions）
+node dist/sync-editor/index.js init
+
+# 如需关闭扩展导出
+node dist/sync-editor/index.js init --no-export-extensions
+```
+
+可选参数：
+- `-o, --output <path>`：输出的 editors-config 文件路径（默认 `local/sync-editor/editors-config.json`）
+- `--extensions-dir <path>`：扩展列表输出目录（默认 `local/sync-editor/extensions`）
+
+可选参数：
+- `-c, --editors-config <path>`：编辑器配置文件路径（默认 `local/sync-editor/editors-config.json`）
+- `-b, --baseline <path>`：baseline 文件路径（默认 `local/sync-editor/last-sync-state.json`）
+- `-o, --conflicts <path>`：冲突文件路径（默认 `local/sync-editor/conflicts.json`）
+- `-u, --use <editor>`：使用单一来源编辑器覆盖其余编辑器（`vscode|cursor|trae`）
+
+### 单来源强制同步（自动安装缺失扩展）
+
+```bash
+node dist/sync-editor/index.js sync -c ./local/sync-editor/editors-config.json -u vscode
+```
+
+说明：
+- 会用来源编辑器的 `settings/keybindings/extensions` 覆盖其它编辑器
+- 对目标编辑器缺失的扩展，自动调用对应命令安装：
+  - VSCode: `code --install-extension <id>`
+  - Cursor: `cursor --install-extension <id>`
+  - Trae: `trae --install-extension <id>`
+
+### 冲突处理
+
+1. 先执行 `sync`，若有冲突会生成 `conflicts.json`
+2. 手动编辑冲突条目，设置 `status: "resolved"` 和 `chosen`
+3. 再执行 `resolve` 应用结果
+
+```bash
+node dist/sync-editor/index.js resolve
+```
+
+`resolve` 中 `-c, --editors-config` 和 `-f, --file` 都可省略：  
+- `--editors-config` 默认 `local/sync-editor/editors-config.json`  
+- `--file` 默认 `local/sync-editor/conflicts.json`
+
+`chosen` 支持：
+- `vscode`
+- `cursor`
+- `trae`
+- `custom`（需同时提供 `customValue`）
+
 ## 配置参数说明
 
 | 参数 | 类型 | 描述 |

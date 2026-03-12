@@ -5,7 +5,8 @@
   "type": "commonjs",
   "main": "dist/auto-cmd/index.js",
   "bin": {
-    "auto-cmd": "dist/auto-cmd/index.js"
+    "auto-cmd": "dist/auto-cmd/index.js",
+    "sync-editor": "dist/sync-editor/index.js"
   },
   "scripts": {
     "build": "tsc",
