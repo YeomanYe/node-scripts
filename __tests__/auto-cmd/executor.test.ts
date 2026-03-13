@@ -1,4 +1,4 @@
-import { parseCount, parseWait } from '../src/auto-cmd/executor';
+import { parseCount, parseWait } from '../../src/auto-cmd/executor';
 
 describe('parseCount', () => {
   it('should return default values when count is undefined', () => {

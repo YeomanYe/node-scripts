@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Config } from '../src/auto-cmd/types';
-import { getParser, isSupported, getSupportedExtensions } from '../src/auto-cmd/parsers';
-import { setConfigPath, getConfigPath, readConfig, updateConfig } from '../src/auto-cmd/config';
+import { Config } from '../../src/auto-cmd/types';
+import { getParser, isSupported, getSupportedExtensions } from '../../src/auto-cmd/parsers';
+import { setConfigPath, getConfigPath, readConfig, updateConfig } from '../../src/auto-cmd/config';
 
 describe('config module', () => {
   const testConfigDir = path.join(process.cwd(), 'local');

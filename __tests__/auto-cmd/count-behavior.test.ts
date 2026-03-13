@@ -1,15 +1,15 @@
-import { executeCommands, parseCount } from '../src/auto-cmd/executor';
-import { Config } from '../src/auto-cmd/types';
-import { updateConfig } from '../src/auto-cmd/config';
+import { executeCommands, parseCount } from '../../src/auto-cmd/executor';
+import { Config } from '../../src/auto-cmd/types';
+import { updateConfig } from '../../src/auto-cmd/config';
 
 // 模拟依赖
-jest.mock('../src/auto-cmd/executor', () => ({
+jest.mock('../../src/auto-cmd/executor', () => ({
   executeCommand: jest.fn().mockResolvedValue(true),
   executeCommandGroup: jest.fn().mockResolvedValue(true),
-  executeCommands: jest.requireActual('../src/auto-cmd/executor').executeCommands,
+  executeCommands: jest.requireActual('../../src/auto-cmd/executor').executeCommands,
 }));
 
-jest.mock('../src/auto-cmd/config', () => ({
+jest.mock('../../src/auto-cmd/config', () => ({
   updateConfig: jest.fn()
 }));
 

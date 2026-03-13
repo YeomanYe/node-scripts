@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
-import { parsers, getParser, isSupported, getSupportedExtensions, ConfigParser } from '../src/auto-cmd/parsers';
-import { Config } from '../src/auto-cmd/types';
+import { parsers, getParser, isSupported, getSupportedExtensions, ConfigParser } from '../../src/auto-cmd/parsers';
+import { Config } from '../../src/auto-cmd/types';
 
 describe('configParsers', () => {
   const testDir = path.join(process.cwd(), 'local');

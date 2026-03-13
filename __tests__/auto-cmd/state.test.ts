@@ -7,7 +7,7 @@ import {
   getTodayDateString,
   isExecutedToday,
   updateExecutionState
-} from '../src/auto-cmd/state';
+} from '../../src/auto-cmd/state';
 
 describe('state module', () => {
   const testStateDir = path.join(process.cwd(), 'local');

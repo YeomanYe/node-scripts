@@ -1,4 +1,4 @@
-import { ExecCommandExecutor, ExecFileCommandExecutor, CommandExecutor, ExecuteResult } from '../src/auto-cmd/command-executor';
+import { ExecCommandExecutor, ExecFileCommandExecutor, CommandExecutor, ExecuteResult } from '../../src/auto-cmd/command-executor';
 
 describe('ExecCommandExecutor', () => {
   let executor: ExecCommandExecutor;

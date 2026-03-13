@@ -1,4 +1,4 @@
-import { parseTime, getCurrentTimeInMinutes, getNextExecutionTime, getNextDayFirstTime } from '../src/auto-cmd/time';
+import { parseTime, getCurrentTimeInMinutes, getNextExecutionTime, getNextDayFirstTime } from '../../src/auto-cmd/time';
 
 describe('parseTime', () => {
   it('should parse time string to minutes', () => {
