@@ -230,6 +230,69 @@ pnpm test
 pnpm start
 ```
 
+## Exec-Recursive（递归执行命令）
+
+`exec-recursive` 用于在当前目录及其子目录中递归执行命令，支持深度控制和深度优先搜索。
+
+### 功能特性
+
+- 深度优先搜索（DFS），从最底层目录往上执行
+- 支持设置递归深度 `-d n`
+- 自动跳过隐藏目录（以 `.` 开头）和 `node_modules`
+- 支持 dry-run 预演模式
+- 支持命令失败后继续执行
+
+### 使用方式
+
+```bash
+exec-recursive <command> [options]
+```
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `<command>` | 要执行的命令 |
+| `-d, --depth <number>` | 最大递归深度（默认 1，0 表示仅当前目录） |
+| `--dry-run` | 预演模式，只显示将执行的命令 |
+| `-c, --continue-on-error` | 命令失败后继续执行 |
+
+### 示例
+
+```bash
+# 在当前目录和所有子目录执行 git status
+exec-recursive 'git status' -d 3
+
+# 预演模式查看将执行的操作
+exec-recursive 'npm install' -d 2 --dry-run
+
+# 在所有子目录执行命令，失败后继续
+exec-recursive 'pnpm build' -d 1 -c
+
+# 仅在当前目录执行
+exec-recursive 'ls -la' -d 0
+```
+
+### 执行顺序示例
+
+假设目录结构：
+```
+root/
+├── a/
+│   ├── a1/
+│   └── a2/
+└── b/
+    └── b1/
+```
+
+执行 `exec-recursive 'pwd' -d 2` 时，执行顺序为：
+1. `root/a/a1` (depth 2)
+2. `root/a/a2` (depth 2)
+3. `root/a` (depth 1)
+4. `root/b/b1` (depth 2)
+5. `root/b` (depth 1)
+6. `root` (depth 0)
+
 ## 许可证
 
 MIT License

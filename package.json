@@ -6,7 +6,8 @@
   "main": "dist/auto-cmd/index.js",
   "bin": {
     "auto-cmd": "dist/auto-cmd/index.js",
-    "sync-editor": "dist/sync-editor/index.js"
+    "sync-editor": "dist/sync-editor/index.js",
+    "exec-recursive": "dist/exec-recursive/index.js"
   },
   "scripts": {
     "build": "tsc",
