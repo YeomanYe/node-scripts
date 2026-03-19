@@ -172,7 +172,7 @@ node dist/sync-editor/index.js resolve
 | `commands[].path` | 字符串 | 执行命令的工作目录 |
 | `commands[].cmds` | 字符串数组 | 要执行的命令列表 |
 | `commands[].count` | 数字（可选） | 命令组执行次数：<br>- 每次执行后 count 减 1<br>- count 变为 0 时保留命令（不再执行）<br>- 无此参数时执行后立即删除 |
-| `wait` | 数字或字符串（可选） | 命令间等待时间（秒），支持范围格式 |
+| `wait` | 数字或字符串（可选） | 命令间等待时间（秒），支持范围格式。范围格式为 `m-n`，如 `1-3` 表示1到3秒之间随机等待 |
 
 ## 配置文件格式
 
@@ -183,6 +183,7 @@ node dist/sync-editor/index.js resolve
   "time": ["10:00", "15:00", "20:00"],
   "mode": "once",
   "count": "2",
+  "wait": "1-3",
   "commands": [
     {
       "path": "/path/to/directory",
@@ -201,6 +202,7 @@ time:
   - '20:00'
 mode: 'repeat'
 count: '1-3'
+wait: '0.5-1.5'
 commands:
   - path: /path/to/directory
     cmds:
