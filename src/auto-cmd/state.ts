@@ -2,89 +2,102 @@ import fs from 'fs/promises';
 import path from 'path';
 import { ExecutionState } from './types';
 
-/** 状态文件名 */
 const STATE_FILE_NAME = 'auto-cmd-state.json';
-
-/** 状态目录名 */
 const STATE_DIR_NAME = 'local';
 
-/**
- * 获取状态文件路径
- * @returns 状态文件的完整路径
- */
 export function getStateFilePath(): string {
   return path.join(process.cwd(), STATE_DIR_NAME, STATE_FILE_NAME);
 }
 
-/**
- * 确保状态文件目录存在
- */
 export async function ensureStateDir(): Promise<void> {
+  console.log(`[Auto-Cmd State] 步骤: 确保状态目录存在`);
   const stateDir = path.dirname(getStateFilePath());
+  console.log(`[Auto-Cmd State] 配置信息: 状态目录路径 = ${stateDir}`);
+  
   try {
     await fs.access(stateDir);
+    console.log(`[Auto-Cmd State] 结果: 状态目录已存在`);
   } catch {
+    console.log(`[Auto-Cmd State] 状态目录不存在，正在创建...`);
     await fs.mkdir(stateDir, { recursive: true });
+    console.log(`[Auto-Cmd State] 结果: 状态目录创建成功`);
   }
 }
 
-/**
- * 读取执行状态
- * @returns 执行状态对象，如果读取失败返回默认状态
- */
 export async function readExecutionState(): Promise<ExecutionState> {
+  console.log(`[Auto-Cmd State] ========== 读取执行状态 ==========`);
+  console.log(`[Auto-Cmd State] 步骤: 从文件读取执行状态`);
+  
   await ensureStateDir();
   const statePath = getStateFilePath();
+  console.log(`[Auto-Cmd State] 配置信息: 状态文件路径 = ${statePath}`);
 
   try {
     const content = await fs.readFile(statePath, 'utf8');
-    return JSON.parse(content);
+    const state = JSON.parse(content);
+    console.log(`[Auto-Cmd State] 结果: 状态读取成功`);
+    console.log(`[Auto-Cmd State]   - lastExecutedDate: ${state.lastExecutedDate}`);
+    console.log(`[Auto-Cmd State]   - executed: ${state.executed}`);
+    return state;
   } catch {
-    // 如果文件不存在或解析失败，返回默认状态
-    return {
+    console.log(`[Auto-Cmd State] 状态文件不存在或解析失败，返回默认状态`);
+    const defaultState: ExecutionState = {
       lastExecutedDate: '',
       executed: false
     };
+    console.log(`[Auto-Cmd State] 结果: 返回默认状态 = ${JSON.stringify(defaultState)}`);
+    return defaultState;
   }
 }
 
-/**
- * 写入执行状态
- * @param state - 执行状态对象
- */
 export async function writeExecutionState(state: ExecutionState): Promise<void> {
+  console.log(`[Auto-Cmd State] ========== 写入执行状态 ==========`);
+  console.log(`[Auto-Cmd State] 步骤: 将状态写入文件`);
+  console.log(`[Auto-Cmd State] 配置信息:`);
+  console.log(`[Auto-Cmd State]   - lastExecutedDate: ${state.lastExecutedDate}`);
+  console.log(`[Auto-Cmd State]   - executed: ${state.executed}`);
+  
   await ensureStateDir();
   const statePath = getStateFilePath();
   await fs.writeFile(statePath, JSON.stringify(state, null, 2), 'utf8');
+  console.log(`[Auto-Cmd State] 结果: 状态写入成功，路径 = ${statePath}`);
 }
 
-/**
- * 获取今天的日期字符串
- * @returns YYYY-MM-DD 格式的日期字符串
- */
 export function getTodayDateString(): string {
   const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  return dateStr;
 }
 
-/**
- * 检查今天是否已经执行过
- * @returns 如果今天已执行返回 true
- */
 export async function isExecutedToday(): Promise<boolean> {
+  console.log(`[Auto-Cmd State] ========== 检查今日是否已执行 ==========`);
+  console.log(`[Auto-Cmd State] 步骤: 比较状态日期与今天日期`);
+  
   const state = await readExecutionState();
   const today = getTodayDateString();
-  return state.lastExecutedDate === today && state.executed;
+  
+  console.log(`[Auto-Cmd State] 配置信息:`);
+  console.log(`[Auto-Cmd State]   - 状态中日期: ${state.lastExecutedDate}`);
+  console.log(`[Auto-Cmd State]   - 今天日期: ${today}`);
+  
+  const result = state.lastExecutedDate === today && state.executed;
+  console.log(`[Auto-Cmd State] 结果: 今日是否已执行 = ${result}`);
+  
+  return result;
 }
 
-/**
- * 更新执行状态为今天已执行
- * @param executed - 是否执行成功
- */
 export async function updateExecutionState(executed: boolean): Promise<void> {
+  console.log(`[Auto-Cmd State] ========== 更新执行状态 ==========`);
+  console.log(`[Auto-Cmd State] 步骤: 标记今天为已执行`);
+  console.log(`[Auto-Cmd State] 配置信息: executed = ${executed}`);
+  
   const today = getTodayDateString();
+  console.log(`[Auto-Cmd State] 今天日期: ${today}`);
+  
   await writeExecutionState({
     lastExecutedDate: today,
     executed
   });
+  
+  console.log(`[Auto-Cmd State] 结果: 执行状态已更新`);
 }

@@ -1,62 +1,81 @@
 import { MS_PER_MINUTE, MINUTES_PER_DAY } from './constants';
 
-/**
- * 解析时间字符串，返回分钟数
- * @param timeStr - 时间字符串，格式为 "HH:MM"
- * @returns 从 00:00 开始的分钟数
- */
 export function parseTime(timeStr: string): number {
+  console.log(`[Auto-Cmd Time] 步骤: 解析时间字符串`);
+  console.log(`[Auto-Cmd Time] 配置信息: timeStr = ${timeStr}`);
+  
   const [hours, minutes] = timeStr.split(':').map(Number);
-  return hours * 60 + minutes;
+  const result = hours * 60 + minutes;
+  
+  console.log(`[Auto-Cmd Time] 结果: ${timeStr} -> ${result} 分钟 (从00:00开始)`);
+  return result;
 }
 
-/**
- * 获取当前时间的分钟数
- * @returns 从 00:00 开始的当前分钟数 (0-1439)
- */
 export function getCurrentTimeInMinutes(): number {
   const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return minutes;
 }
 
-/**
- * 解析并排序时间数组
- * @param targetTimes - 时间字符串数组
- * @returns 排序后的分钟数数组
- */
+export function formatTimeFromMinutes(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
 function parseAndSortTimes(targetTimes: string[]): number[] {
-  return targetTimes.map(parseTime).sort((a, b) => a - b);
+  console.log(`[Auto-Cmd Time] 步骤: 解析并排序时间数组`);
+  console.log(`[Auto-Cmd Time] 配置信息: targetTimes = ${JSON.stringify(targetTimes)}`);
+  
+  const result = targetTimes.map(parseTime).sort((a, b) => a - b);
+  
+  console.log(`[Auto-Cmd Time] 结果: 排序后的分钟数 = ${JSON.stringify(result)}`);
+  return result;
 }
 
-/**
- * 计算距离下次执行的时间
- * @param targetTimes - 目标时间数组
- * @returns 距离下次执行的毫秒数
- */
 export function getNextExecutionTime(targetTimes: string[]): number {
+  console.log(`[Auto-Cmd Time] ========== 计算下次执行时间 ==========`);
+  console.log(`[Auto-Cmd Time] 步骤: 计算距离下次执行的毫秒数`);
+  console.log(`[Auto-Cmd Time] 配置信息: targetTimes = ${JSON.stringify(targetTimes)}`);
+  
   const currentMinutes = getCurrentTimeInMinutes();
   const parsedTimes = parseAndSortTimes(targetTimes);
+  
+  console.log(`[Auto-Cmd Time] 当前时间: ${formatTimeFromMinutes(currentMinutes)} (${currentMinutes}分钟)`);
 
   for (const time of parsedTimes) {
     if (time > currentMinutes) {
-      return (time - currentMinutes) * MS_PER_MINUTE;
+      const delay = (time - currentMinutes) * MS_PER_MINUTE;
+      console.log(`[Auto-Cmd Time] 找到今天下一个执行时间: ${formatTimeFromMinutes(time)}`);
+      console.log(`[Auto-Cmd Time] 结果: 延迟 ${delay}ms (${Math.round(delay / 60000)}分钟)`);
+      return delay;
     }
   }
 
-  // 如果当天没有剩余时间，计算明天第一个时间点
   const firstTimeTomorrow = parsedTimes[0] + MINUTES_PER_DAY;
-  return (firstTimeTomorrow - currentMinutes) * MS_PER_MINUTE;
+  const delay = (firstTimeTomorrow - currentMinutes) * MS_PER_MINUTE;
+  
+  console.log(`[Auto-Cmd Time] 今天没有剩余执行时间，计算明天第一个时间点`);
+  console.log(`[Auto-Cmd Time] 明天第一个执行时间: ${formatTimeFromMinutes(parsedTimes[0])}`);
+  console.log(`[Auto-Cmd Time] 结果: 延迟 ${delay}ms (${Math.round(delay / 60000)}分钟)`);
+  
+  return delay;
 }
 
-/**
- * 计算距离明天最早执行时间的毫秒数
- * @param targetTimes - 目标时间数组
- * @returns 距离明天第一个时间点的毫秒数
- */
 export function getNextDayFirstTime(targetTimes: string[]): number {
+  console.log(`[Auto-Cmd Time] ========== 计算明天首次执行时间 ==========`);
+  console.log(`[Auto-Cmd Time] 步骤: 计算距离明天第一个时间点的毫秒数`);
+  console.log(`[Auto-Cmd Time] 配置信息: targetTimes = ${JSON.stringify(targetTimes)}`);
+  
   const currentMinutes = getCurrentTimeInMinutes();
   const parsedTimes = parseAndSortTimes(targetTimes);
 
   const firstTimeTomorrow = parsedTimes[0] + MINUTES_PER_DAY;
-  return (firstTimeTomorrow - currentMinutes) * MS_PER_MINUTE;
+  const delay = (firstTimeTomorrow - currentMinutes) * MS_PER_MINUTE;
+  
+  console.log(`[Auto-Cmd Time] 当前时间: ${formatTimeFromMinutes(currentMinutes)}`);
+  console.log(`[Auto-Cmd Time] 明天第一个执行时间: ${formatTimeFromMinutes(parsedTimes[0])}`);
+  console.log(`[Auto-Cmd Time] 结果: 延迟 ${delay}ms (${Math.round(delay / 60000)}分钟)`);
+  
+  return delay;
 }

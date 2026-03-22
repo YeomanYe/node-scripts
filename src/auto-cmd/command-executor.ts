@@ -4,37 +4,17 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-/**
- * 命令执行结果
- */
 export interface ExecuteResult {
-  /** 是否执行成功 */
   success: boolean;
-  /** 标准输出 */
   stdout?: string;
-  /** 标准错误 */
   stderr?: string;
-  /** 错误信息（如果有） */
   error?: string;
 }
 
-/**
- * 命令执行器接口
- */
 export interface CommandExecutor {
-  /**
-   * 执行命令
-   * @param cmd - 要执行的命令
-   * @param cwd - 执行目录
-   * @returns 执行结果
-   */
   execute(cmd: string, cwd: string): Promise<ExecuteResult>;
 }
 
-/**
- * 基于 child_process.exec 的执行器
- * 支持 shell 特性（管道、重定向等）
- */
 export class ExecCommandExecutor implements CommandExecutor {
   private options: ExecOptions;
 
@@ -43,14 +23,30 @@ export class ExecCommandExecutor implements CommandExecutor {
   }
 
   async execute(cmd: string, cwd: string): Promise<ExecuteResult> {
+    console.log(`[Auto-Cmd CmdExec] ========== ExecCommandExecutor.execute ==========`);
+    console.log(`[Auto-Cmd CmdExec] 步骤: 使用 child_process.exec 执行命令`);
+    console.log(`[Auto-Cmd CmdExec] 配置信息:`);
+    console.log(`[Auto-Cmd CmdExec]   - 命令: ${cmd}`);
+    console.log(`[Auto-Cmd CmdExec]   - 执行目录: ${cwd}`);
+    console.log(`[Auto-Cmd CmdExec]   - 执行器类型: ExecCommandExecutor (支持 shell 特性)`);
+    
     try {
+      const startTime = Date.now();
       const { stdout, stderr } = await execAsync(cmd, { ...this.options, cwd });
+      const duration = Date.now() - startTime;
+      
+      console.log(`[Auto-Cmd CmdExec] 执行耗时: ${duration}ms`);
+      console.log(`[Auto-Cmd CmdExec] 结果: 执行成功`);
+      
       return {
         success: true,
         stdout: stdout?.toString(),
         stderr: stderr?.toString()
       };
     } catch (error) {
+      console.error(`[Auto-Cmd CmdExec] 结果: 执行失败`);
+      console.error(`[Auto-Cmd CmdExec] 错误: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -59,10 +55,6 @@ export class ExecCommandExecutor implements CommandExecutor {
   }
 }
 
-/**
- * 基于 child_process.execFile 的执行器
- * 更安全，不支持 shell 特性
- */
 export class ExecFileCommandExecutor implements CommandExecutor {
   private options: ExecOptions;
 
@@ -71,21 +63,41 @@ export class ExecFileCommandExecutor implements CommandExecutor {
   }
 
   async execute(cmd: string, cwd: string): Promise<ExecuteResult> {
+    console.log(`[Auto-Cmd CmdExec] ========== ExecFileCommandExecutor.execute ==========`);
+    console.log(`[Auto-Cmd CmdExec] 步骤: 使用 child_process.execFile 执行命令`);
+    console.log(`[Auto-Cmd CmdExec] 配置信息:`);
+    console.log(`[Auto-Cmd CmdExec]   - 命令: ${cmd}`);
+    console.log(`[Auto-Cmd CmdExec]   - 执行目录: ${cwd}`);
+    console.log(`[Auto-Cmd CmdExec]   - 执行器类型: ExecFileCommandExecutor (更安全，不支持 shell 特性)`);
+    
     try {
-      // 解析命令和参数
       const parts = this.parseCommand(cmd);
       if (parts.length === 0) {
+        console.error(`[Auto-Cmd CmdExec] 结果: 空命令，执行失败`);
         return { success: false, error: 'Empty command' };
       }
 
       const [command, ...args] = parts;
+      console.log(`[Auto-Cmd CmdExec] 解析命令:`);
+      console.log(`[Auto-Cmd CmdExec]   - 可执行文件: ${command}`);
+      console.log(`[Auto-Cmd CmdExec]   - 参数: ${args.join(' ')}`);
+      
+      const startTime = Date.now();
       const { stdout, stderr } = await execFileAsync(command, args, { ...this.options, cwd });
+      const duration = Date.now() - startTime;
+      
+      console.log(`[Auto-Cmd CmdExec] 执行耗时: ${duration}ms`);
+      console.log(`[Auto-Cmd CmdExec] 结果: 执行成功`);
+      
       return {
         success: true,
         stdout: stdout?.toString(),
         stderr: stderr?.toString()
       };
     } catch (error) {
+      console.error(`[Auto-Cmd CmdExec] 结果: 执行失败`);
+      console.error(`[Auto-Cmd CmdExec] 错误: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -93,12 +105,9 @@ export class ExecFileCommandExecutor implements CommandExecutor {
     }
   }
 
-  /**
-   * 解析命令字符串为命令和参数数组
-   * @param cmd - 命令字符串
-   * @returns 命令和参数数组
-   */
   private parseCommand(cmd: string): string[] {
+    console.log(`[Auto-Cmd CmdExec] 步骤: 解析命令字符串为命令和参数数组`);
+    
     const parts: string[] = [];
     let current = '';
     let inQuote = false;
@@ -131,11 +140,9 @@ export class ExecFileCommandExecutor implements CommandExecutor {
       parts.push(current.trim());
     }
 
+    console.log(`[Auto-Cmd CmdExec] 结果: 解析出 ${parts.length} 个部分`);
     return parts;
   }
 }
 
-/**
- * 默认执行器实例
- */
 export const defaultExecutor = new ExecCommandExecutor();

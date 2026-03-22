@@ -101,17 +101,30 @@ describe('state module', () => {
         executed: true
       };
 
-      // Delete directory first
+      const isolatedTestDir = path.join(process.cwd(), 'local-test-isolated');
+      const isolatedStateFile = path.join(isolatedTestDir, 'auto-cmd-state.json');
+      
       try {
-        await fs.rm(testStateDir, { recursive: true });
+        await fs.rm(isolatedTestDir, { recursive: true });
       } catch {
         // Directory may not exist
       }
 
+      const originalGetStateFilePath = require('../../src/auto-cmd/state').getStateFilePath;
+      require('../../src/auto-cmd/state').getStateFilePath = () => isolatedStateFile;
+
       await writeExecutionState(testState);
 
-      const exists = await fs.access(testStateDir).then(() => true).catch(() => false);
+      const exists = await fs.access(isolatedTestDir).then(() => true).catch(() => false);
       expect(exists).toBe(true);
+
+      require('../../src/auto-cmd/state').getStateFilePath = originalGetStateFilePath;
+      
+      try {
+        await fs.rm(isolatedTestDir, { recursive: true });
+      } catch {
+        // Cleanup
+      }
     });
   });
 
