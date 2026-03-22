@@ -1,15 +1,24 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { Config } from '../../src/auto-cmd/types';
 import { getParser, isSupported, getSupportedExtensions } from '../../src/auto-cmd/parsers';
 import { setConfigPath, getConfigPath, readConfig, updateConfig } from '../../src/auto-cmd/config';
 
 describe('config module', () => {
-  const testConfigDir = path.join(process.cwd(), 'local');
+  let testRoot: string;
   let testConfigPath: string;
 
+  beforeAll(async () => {
+    testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-cmd-config-'));
+  });
+
+  afterAll(async () => {
+    await fs.rm(testRoot, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
-    testConfigPath = path.join(testConfigDir, 'test-config.json');
+    testConfigPath = path.join(testRoot, 'test-config.json');
     setConfigPath(testConfigPath);
   });
 
@@ -18,14 +27,6 @@ describe('config module', () => {
       await fs.unlink(testConfigPath);
     } catch {
       // File may not exist
-    }
-  });
-
-  beforeAll(async () => {
-    try {
-      await fs.mkdir(testConfigDir, { recursive: true });
-    } catch {
-      // Directory may already exist
     }
   });
 
@@ -44,7 +45,6 @@ describe('config module', () => {
 
   describe('readConfig', () => {
     it('should return default config when file does not exist', async () => {
-      // Delete file if exists
       try {
         await fs.unlink(testConfigPath);
       } catch {
@@ -80,21 +80,18 @@ describe('config module', () => {
 
       const result = await readConfig();
 
-      // Should return default config
       expect(result.time).toBeDefined();
       expect(result.mode).toBeDefined();
     });
 
     it('should handle unsupported format gracefully', async () => {
-      const unsupportedPath = path.join(testConfigDir, 'test-config.xyz');
+      const unsupportedPath = path.join(testRoot, 'test-config.xyz');
       setConfigPath(unsupportedPath);
 
       await fs.writeFile(unsupportedPath, '{}');
 
-      // Should return default config gracefully instead of throwing
       const result = await readConfig();
 
-      // Should return default config since format is unsupported
       expect(result.time).toBeDefined();
       expect(result.mode).toBeDefined();
       expect(result.commands).toBeDefined();

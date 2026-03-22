@@ -1,27 +1,29 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
-import {
-  getStateFilePath,
-  readExecutionState,
-  writeExecutionState,
-  getTodayDateString,
-  isExecutedToday,
-  updateExecutionState
-} from '../../src/auto-cmd/state';
 
 describe('state module', () => {
-  const testStateDir = path.join(process.cwd(), 'local');
-  const testStateFile = path.join(testStateDir, 'auto-cmd-state.json');
+  let testRoot: string;
+  let testStateFile: string;
+  let stateModule: typeof import('../../src/auto-cmd/state');
 
   beforeAll(async () => {
-    try {
-      await fs.mkdir(testStateDir, { recursive: true });
-    } catch {
-      // Directory may already exist
-    }
+    testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-cmd-state-'));
+    testStateFile = path.join(testRoot, 'auto-cmd-state.json');
+  });
+
+  afterAll(async () => {
+    await fs.rm(testRoot, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    jest.resetModules();
+    process.env.AUTO_CMD_STATE_FILE = testStateFile;
+    stateModule = await import('../../src/auto-cmd/state');
   });
 
   afterEach(async () => {
+    delete process.env.AUTO_CMD_STATE_FILE;
     try {
       await fs.unlink(testStateFile);
     } catch {
@@ -31,20 +33,20 @@ describe('state module', () => {
 
   describe('getStateFilePath', () => {
     it('should return correct path', () => {
-      const result = getStateFilePath();
-      expect(result).toContain('auto-cmd-state.json');
+      const result = stateModule.getStateFilePath();
+      expect(result).toBe(testStateFile);
     });
   });
 
   describe('getTodayDateString', () => {
     it('should return today\'s date in YYYY-MM-DD format', () => {
-      const result = getTodayDateString();
+      const result = stateModule.getTodayDateString();
       const regex = /^\d{4}-\d{2}-\d{2}$/;
       expect(regex.test(result)).toBe(true);
     });
 
     it('should pad single digit months and days', () => {
-      const result = getTodayDateString();
+      const result = stateModule.getTodayDateString();
       const parts = result.split('-');
       expect(parts[1].length).toBe(2);
       expect(parts[2].length).toBe(2);
@@ -53,7 +55,7 @@ describe('state module', () => {
 
   describe('readExecutionState', () => {
     it('should return default state when file does not exist', async () => {
-      const result = await readExecutionState();
+      const result = await stateModule.readExecutionState();
       expect(result).toEqual({
         lastExecutedDate: '',
         executed: false
@@ -67,14 +69,14 @@ describe('state module', () => {
       };
       await fs.writeFile(testStateFile, JSON.stringify(testState));
 
-      const result = await readExecutionState();
+      const result = await stateModule.readExecutionState();
       expect(result).toEqual(testState);
     });
 
     it('should handle invalid JSON gracefully', async () => {
       await fs.writeFile(testStateFile, 'invalid json');
 
-      const result = await readExecutionState();
+      const result = await stateModule.readExecutionState();
       expect(result).toEqual({
         lastExecutedDate: '',
         executed: false
@@ -89,7 +91,7 @@ describe('state module', () => {
         executed: true
       };
 
-      await writeExecutionState(testState);
+      await stateModule.writeExecutionState(testState);
 
       const content = await fs.readFile(testStateFile, 'utf8');
       expect(JSON.parse(content)).toEqual(testState);
@@ -101,30 +103,17 @@ describe('state module', () => {
         executed: true
       };
 
-      const isolatedTestDir = path.join(process.cwd(), 'local-test-isolated');
+      const isolatedTestDir = path.join(testRoot, 'isolated-nested', 'deep');
       const isolatedStateFile = path.join(isolatedTestDir, 'auto-cmd-state.json');
-      
-      try {
-        await fs.rm(isolatedTestDir, { recursive: true });
-      } catch {
-        // Directory may not exist
-      }
 
-      const originalGetStateFilePath = require('../../src/auto-cmd/state').getStateFilePath;
-      require('../../src/auto-cmd/state').getStateFilePath = () => isolatedStateFile;
+      process.env.AUTO_CMD_STATE_FILE = isolatedStateFile;
+      jest.resetModules();
+      const freshModule = await import('../../src/auto-cmd/state');
 
-      await writeExecutionState(testState);
+      await freshModule.writeExecutionState(testState);
 
       const exists = await fs.access(isolatedTestDir).then(() => true).catch(() => false);
       expect(exists).toBe(true);
-
-      require('../../src/auto-cmd/state').getStateFilePath = originalGetStateFilePath;
-      
-      try {
-        await fs.rm(isolatedTestDir, { recursive: true });
-      } catch {
-        // Cleanup
-      }
     });
   });
 
@@ -136,48 +125,48 @@ describe('state module', () => {
       };
       await fs.writeFile(testStateFile, JSON.stringify(yesterdayState));
 
-      const result = await isExecutedToday();
+      const result = await stateModule.isExecutedToday();
       expect(result).toBe(false);
     });
 
     it('should return true when executed today', async () => {
-      const today = getTodayDateString();
+      const today = stateModule.getTodayDateString();
       const todayState = {
         lastExecutedDate: today,
         executed: true
       };
       await fs.writeFile(testStateFile, JSON.stringify(todayState));
 
-      const result = await isExecutedToday();
+      const result = await stateModule.isExecutedToday();
       expect(result).toBe(true);
     });
 
     it('should return false when executed is false', async () => {
-      const today = getTodayDateString();
+      const today = stateModule.getTodayDateString();
       const state = {
         lastExecutedDate: today,
         executed: false
       };
       await fs.writeFile(testStateFile, JSON.stringify(state));
 
-      const result = await isExecutedToday();
+      const result = await stateModule.isExecutedToday();
       expect(result).toBe(false);
     });
   });
 
   describe('updateExecutionState', () => {
     it('should update state with today\'s date', async () => {
-      await updateExecutionState(true);
+      await stateModule.updateExecutionState(true);
 
       const content = await fs.readFile(testStateFile, 'utf8');
       const state = JSON.parse(content);
 
-      expect(state.lastExecutedDate).toBe(getTodayDateString());
+      expect(state.lastExecutedDate).toBe(stateModule.getTodayDateString());
       expect(state.executed).toBe(true);
     });
 
     it('should update executed to false', async () => {
-      await updateExecutionState(false);
+      await stateModule.updateExecutionState(false);
 
       const content = await fs.readFile(testStateFile, 'utf8');
       const state = JSON.parse(content);

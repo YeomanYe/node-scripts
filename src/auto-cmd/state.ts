@@ -6,6 +6,9 @@ const STATE_FILE_NAME = 'auto-cmd-state.json';
 const STATE_DIR_NAME = 'local';
 
 export function getStateFilePath(): string {
+  if (process.env.AUTO_CMD_STATE_FILE) {
+    return process.env.AUTO_CMD_STATE_FILE;
+  }
   return path.join(process.cwd(), STATE_DIR_NAME, STATE_FILE_NAME);
 }
 

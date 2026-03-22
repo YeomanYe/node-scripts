@@ -1,18 +1,19 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import yaml from 'yaml';
 import { parsers, getParser, isSupported, getSupportedExtensions, ConfigParser } from '../../src/auto-cmd/parsers';
 import { Config } from '../../src/auto-cmd/types';
 
 describe('configParsers', () => {
-  const testDir = path.join(process.cwd(), 'local');
+  let testRoot: string;
 
   beforeAll(async () => {
-    try {
-      await fs.mkdir(testDir, { recursive: true });
-    } catch {
-      // Directory may already exist
-    }
+    testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-cmd-parsers-'));
+  });
+
+  afterAll(async () => {
+    await fs.rm(testRoot, { recursive: true, force: true });
   });
 
   describe('parsers', () => {
@@ -87,7 +88,7 @@ describe('configParsers', () => {
   describe('JSON parser', () => {
     it('should read and write JSON config', async () => {
       const parser = getParser('test.json')!;
-      const testPath = path.join(testDir, 'parser-test.json');
+      const testPath = path.join(testRoot, 'parser-test.json');
       const testConfig: Config = {
         time: ['10:00', '20:00'],
         mode: 'repeat',
@@ -99,16 +100,13 @@ describe('configParsers', () => {
 
       expect(readConfig.time).toEqual(['10:00', '20:00']);
       expect(readConfig.mode).toBe('repeat');
-
-      // Cleanup
-      await fs.unlink(testPath);
     });
   });
 
   describe('YAML parser', () => {
     it('should read and write YAML config', async () => {
       const parser = getParser('test.yml')!;
-      const testPath = path.join(testDir, 'parser-test.yml');
+      const testPath = path.join(testRoot, 'parser-test.yml');
       const testConfig: Config = {
         time: ['09:00', '18:00'],
         mode: 'once',
@@ -120,13 +118,6 @@ describe('configParsers', () => {
 
       expect(readConfig.time).toEqual(['09:00', '18:00']);
       expect(readConfig.mode).toBe('once');
-
-      // Cleanup
-      try {
-        await fs.unlink(testPath);
-      } catch {
-        // File may not exist
-      }
     });
   });
 });
