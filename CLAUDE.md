@@ -2,99 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-Two Node.js CLI tools built with TypeScript:
-
-- **auto-cmd**: Automated command execution scheduler - runs commands at specified times, supports JSON/YAML configs, `once` and `repeat` modes
-- **sync-editor**: Bi-directional sync for VSCode/Cursor/Trae settings, keybindings, and extensions
-
 ## Commands
 
 ```bash
 pnpm install          # Install dependencies
-pnpm build            # Compile TypeScript to JavaScript
-pnpm watch            # Watch mode for development
-pnpm start            # Run auto-cmd scheduler
-pnpm execute          # Execute commands immediately (checks time config)
-pnpm test             # Run all tests
-pnpm test -- <pattern>  # Run tests matching pattern (e.g., parsers.test.ts)
+pnpm run build        # Compile TypeScript (tsc) → dist/
+pnpm run watch        # Compile with --watch
+pnpm test             # Run all tests (Jest)
+pnpm test -- __tests__/auto-cmd/config.test.ts   # Run a single test file
+pnpm test -- --testNamePattern="pattern"          # Run tests matching name
 ```
 
 ## Architecture
 
-### auto-cmd (Command Scheduler)
+Monorepo of independent CLI tools, each under `src/<tool>/`, compiled to `dist/<tool>/` and exposed via `bin` in package.json. All tools are CommonJS TypeScript (`"type": "commonjs"`, target ES2022).
 
-```
-src/auto-cmd/
-├── index.ts              # CLI entry with Commander.js
-├── types.ts              # TypeScript interfaces
-├── config.ts             # Config read/write (JSON/YAML)
-├── parsers.ts            # Config file parsers
-├── executor.ts           # Command execution logic
-├── command-executor.ts   # Command executor interface
-├── state.ts              # Execution state persistence
-├── time.ts               # Time parsing and scheduling
-├── constants.ts          # Constants
-└── utils.ts              # Utilities
-```
+### Tools
 
-### sync-editor (Editor Config Sync)
+| Tool | Entry | Purpose |
+|------|-------|---------|
+| **auto-cmd** | `src/auto-cmd/index.ts` | Scheduled command execution (JSON/YAML config, time-based triggers, once/repeat modes) |
+| **sync-editor** | `src/sync-editor/index.ts` | Bidirectional settings sync across VSCode/Cursor/Trae (settings, keybindings, extensions) |
+| **exec-recursive** | `src/exec-recursive/index.ts` | DFS recursive command execution with depth control |
+| **claude-usage** | `src/claude-usage/index.ts` | Claude API usage reporting |
+| **claude-task-runner** | `src/claude-task-runner/index.ts` | Automated Claude task execution with Feishu integration |
 
-```
-src/sync-editor/
-├── index.ts          # CLI entry
-├── init.ts          # Auto-detect editor paths
-├── detect.ts        # Detect editor config paths
-├── sync.ts          # Main sync logic
-├── merge.ts         # Merge conflict resolution
-├── resolve.ts       # Apply resolved conflicts
-├── io.ts            # File I/O operations
-├── install.ts       # Extension install
-├── extensions.ts    # Extension list handling
-├── types.ts         # TypeScript interfaces
-└── resolve.ts       # Resolve conflicts
-```
+### Key patterns
 
-## Test Structure
-
-Tests mirror src structure:
-
-```
-__tests__/
-├── auto-cmd/
-│   ├── config.test.ts
-│   ├── executor.test.ts
-│   └── ...
-└── sync-editor/
-    ├── detect.test.ts
-    ├── init.test.ts
-    └── ...
-```
-
-## Key Design Patterns
-
-- **Modular Design**: Single responsibility per module
-- **Async/Await**: All file operations use promises
-- **State Persistence**: `local/auto-cmd-state.json` for execution state
-- **Time-based Scheduling**: Uses `setTimeout` with millisecond calculations
-- **Config Formats**: JSON, YAML support via dedicated parsers
-
-## Important Paths
-
-- Default config: `local/auto-cmd-config.json`
-- State file: `local/auto-cmd-state.json`
-- Logs: `logs/YYYY-MM-DD.log`
-- Sync editors config: `local/sync-editor/editors-config.json`
-- Sync baseline: `local/sync-editor/last-sync-state.json`
-- Sync conflicts: `local/sync-editor/conflicts.json`
-
-## Count Parameter (auto-cmd)
-
-Two formats:
-- `"n"`: Execute n commands (starting from first)
-- `"m-n"`: Execute a range of commands
-
-## Behavioral Constraints
-
-- **NEVER modify or delete files in the `local/` directory** - Runtime data managed by the application
+- CLI tools use **commander** for argument parsing
+- Config files support both JSON and YAML (via `yaml` package)
+- Tests live in `__tests__/<tool>/` mirroring `src/<tool>/` structure
+- Jest uses `ts-jest` preset with `@/` path alias mapped to `src/`
+- Language: Chinese (README, comments, commit messages are in Chinese)
