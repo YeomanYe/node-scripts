@@ -369,13 +369,12 @@ feishu:
   receive_id_type: "chat_id"
 
 parallelism:
-  rules:
-    - max_usage: 20
-      concurrency: 4
-    - max_usage: 40
-      concurrency: 2
-    - max_usage: 100
-      concurrency: 0
+  - max_usage: 20
+    concurrency: 4
+  - max_usage: 40
+    concurrency: 2
+  - max_usage: 100
+    concurrency: 0
 
 defaults:
   model: sonnet

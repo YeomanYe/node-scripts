@@ -25,13 +25,11 @@ describe('claude-task-runner/config', () => {
           receive_id: 'chat123',
           receive_id_type: 'chat_id',
         },
-        parallelism: {
-          rules: [
-            { max_usage: 30, concurrency: 5 },
-            { max_usage: 80, concurrency: 1 },
-            { max_usage: 100, concurrency: 0 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 30, concurrency: 5 },
+          { max_usage: 80, concurrency: 1 },
+          { max_usage: 100, concurrency: 0 },
+        ],
         defaults: {
           model: 'opus',
           max_budget_usd: 10,
@@ -47,7 +45,7 @@ describe('claude-task-runner/config', () => {
       const result = await loadRunnerConfig(filePath);
 
       expect(result.feishu.app_id).toBe('test-app');
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 30, concurrency: 5 },
         { max_usage: 80, concurrency: 1 },
         { max_usage: 100, concurrency: 0 },
@@ -73,7 +71,7 @@ describe('claude-task-runner/config', () => {
       expect(result.feishu.domain).toBe('https://open.feishu.cn');
       expect(result.feishu.receive_id_type).toBe('chat_id');
 
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 30, concurrency: 4 },
         { max_usage: 50, concurrency: 3 },
         { max_usage: 80, concurrency: 2 },
@@ -90,12 +88,10 @@ describe('claude-task-runner/config', () => {
 
     it('should preserve explicit parallelism rules', async () => {
       const config = {
-        parallelism: {
-          rules: [
-            { max_usage: 25, concurrency: 5 },
-            { max_usage: 75, concurrency: 2 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 25, concurrency: 5 },
+          { max_usage: 75, concurrency: 2 },
+        ],
       };
 
       const filePath = path.join(tmpDir, 'rules-config.yaml');
@@ -103,7 +99,7 @@ describe('claude-task-runner/config', () => {
 
       const result = await loadRunnerConfig(filePath);
 
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 25, concurrency: 5 },
         { max_usage: 75, concurrency: 2 },
       ]);
@@ -116,7 +112,7 @@ describe('claude-task-runner/config', () => {
       const result = await loadRunnerConfig(filePath);
 
       expect(result.feishu.app_id).toBe('');
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 30, concurrency: 4 },
         { max_usage: 50, concurrency: 3 },
         { max_usage: 80, concurrency: 2 },

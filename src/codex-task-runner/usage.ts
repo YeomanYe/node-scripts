@@ -4,7 +4,7 @@ import { RunnerConfig, ParallelismResult } from './types';
 import { log } from './log';
 
 export function resolveParallelism(usagePercent: number, config: RunnerConfig): number {
-  const matchedRule = config.parallelism.rules.find(rule => usagePercent <= rule.max_usage);
+  const matchedRule = config.parallelism.find(rule => usagePercent <= rule.max_usage);
   return matchedRule ? matchedRule.concurrency : 0;
 }
 

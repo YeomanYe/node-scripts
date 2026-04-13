@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import YAML from 'yaml';
-import { RunnerConfig, TaskFile } from './types';
+import { ParallelismRule, RunnerConfig, TaskFile } from './types';
 
 /** 默认配置文件路径（相对于项目根目录） */
 const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/claude-task-runner-config.yaml');
@@ -15,14 +15,12 @@ const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
     receive_id: '',
     receive_id_type: 'chat_id',
   },
-  parallelism: {
-    rules: [
-      { max_usage: 30, concurrency: 4 },
-      { max_usage: 50, concurrency: 3 },
-      { max_usage: 80, concurrency: 2 },
-      { max_usage: 100, concurrency: 0 },
-    ],
-  },
+  parallelism: [
+    { max_usage: 30, concurrency: 4 },
+    { max_usage: 50, concurrency: 3 },
+    { max_usage: 80, concurrency: 2 },
+    { max_usage: 100, concurrency: 0 },
+  ],
   defaults: {
     model: 'sonnet',
     max_budget_usd: 5,
@@ -32,22 +30,33 @@ const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
   },
 };
 
+function resolveParallelismRules(rawParallelism: unknown): ParallelismRule[] {
+  if (Array.isArray(rawParallelism) && rawParallelism.length > 0) {
+    return [...rawParallelism as ParallelismRule[]].sort((a, b) => a.max_usage - b.max_usage);
+  }
+
+  if (typeof rawParallelism === 'object' && rawParallelism !== null) {
+    const legacyRules = (rawParallelism as { rules?: unknown }).rules;
+    if (Array.isArray(legacyRules) && legacyRules.length > 0) {
+      return [...legacyRules as ParallelismRule[]].sort((a, b) => a.max_usage - b.max_usage);
+    }
+  }
+
+  return DEFAULT_RUNNER_CONFIG.parallelism;
+}
+
 /**
  * 合并配置对象，用用户配置覆盖默认值
  * @param userConfig - 用户提供的部分配置
  * @returns 完整的运行器配置
  */
 function mergeConfig(userConfig: Partial<RunnerConfig>): RunnerConfig {
-  const rules = Array.isArray(userConfig.parallelism?.rules) && userConfig.parallelism.rules.length > 0
-    ? [...userConfig.parallelism.rules].sort((a, b) => a.max_usage - b.max_usage)
-    : DEFAULT_RUNNER_CONFIG.parallelism.rules;
-
   return {
     feishu: {
       ...DEFAULT_RUNNER_CONFIG.feishu,
       ...(userConfig.feishu ?? {}),
     },
-    parallelism: { rules },
+    parallelism: resolveParallelismRules((userConfig as { parallelism?: unknown }).parallelism),
     defaults: {
       ...DEFAULT_RUNNER_CONFIG.defaults,
       ...(userConfig.defaults ?? {}),

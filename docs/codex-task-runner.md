@@ -45,13 +45,12 @@ feishu:
   receive_id_type: "chat_id"
 
 parallelism:
-  rules:
-    - max_usage: 15
-      concurrency: 4
-    - max_usage: 35
-      concurrency: 2
-    - max_usage: 100
-      concurrency: 0
+  - max_usage: 15
+    concurrency: 4
+  - max_usage: 35
+    concurrency: 2
+  - max_usage: 100
+    concurrency: 0
 
 defaults:
   model: gpt-5.4
@@ -62,7 +61,7 @@ defaults:
 ```
 
 说明：
-- `rules` 是唯一的并发配置来源，按 `max_usage` 升序匹配
+- `parallelism` 直接就是规则数组，按 `max_usage` 升序匹配
 - 命中规则的条件是“当前用量 `<= max_usage`”
 - 想在 80% 以上停止执行，可以把最后一条写成 `max_usage: 100, concurrency: 0`
 

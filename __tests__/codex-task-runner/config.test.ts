@@ -25,13 +25,11 @@ describe('codex-task-runner/config', () => {
           receive_id: 'chat123',
           receive_id_type: 'chat_id',
         },
-        parallelism: {
-          rules: [
-            { max_usage: 30, concurrency: 5 },
-            { max_usage: 80, concurrency: 1 },
-            { max_usage: 100, concurrency: 0 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 30, concurrency: 5 },
+          { max_usage: 80, concurrency: 1 },
+          { max_usage: 100, concurrency: 0 },
+        ],
         defaults: {
           model: 'gpt-5.4',
           sandbox_mode: 'workspace-write',
@@ -47,7 +45,7 @@ describe('codex-task-runner/config', () => {
       const result = await loadRunnerConfig(filePath);
 
       expect(result.feishu.app_id).toBe('test-app');
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 30, concurrency: 5 },
         { max_usage: 80, concurrency: 1 },
         { max_usage: 100, concurrency: 0 },
@@ -71,7 +69,7 @@ describe('codex-task-runner/config', () => {
 
       expect(result.feishu.app_id).toBe('my-app');
       expect(result.feishu.domain).toBe('https://open.feishu.cn');
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 30, concurrency: 4 },
         { max_usage: 50, concurrency: 3 },
         { max_usage: 80, concurrency: 2 },
@@ -85,12 +83,10 @@ describe('codex-task-runner/config', () => {
 
     it('should preserve explicit parallelism rules', async () => {
       const config = {
-        parallelism: {
-          rules: [
-            { max_usage: 10, concurrency: 4 },
-            { max_usage: 70, concurrency: 1 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 10, concurrency: 4 },
+          { max_usage: 70, concurrency: 1 },
+        ],
       };
 
       const filePath = path.join(tmpDir, 'rules-config.yaml');
@@ -98,7 +94,7 @@ describe('codex-task-runner/config', () => {
 
       const result = await loadRunnerConfig(filePath);
 
-      expect(result.parallelism.rules).toEqual([
+      expect(result.parallelism).toEqual([
         { max_usage: 10, concurrency: 4 },
         { max_usage: 70, concurrency: 1 },
       ]);

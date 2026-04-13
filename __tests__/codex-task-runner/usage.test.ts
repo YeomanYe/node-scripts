@@ -29,14 +29,12 @@ describe('codex-task-runner/usage', () => {
       receive_id: '',
       receive_id_type: 'chat_id',
     },
-    parallelism: {
-      rules: [
-        { max_usage: 30, concurrency: 4 },
-        { max_usage: 50, concurrency: 3 },
-        { max_usage: 80, concurrency: 2 },
-        { max_usage: 100, concurrency: 0 },
-      ],
-    },
+    parallelism: [
+      { max_usage: 30, concurrency: 4 },
+      { max_usage: 50, concurrency: 3 },
+      { max_usage: 80, concurrency: 2 },
+      { max_usage: 100, concurrency: 0 },
+    ],
     defaults: {
       model: 'gpt-5.4',
       sandbox_mode: 'workspace-write',
@@ -60,14 +58,12 @@ describe('codex-task-runner/usage', () => {
   it('should prefer configured rules when provided', () => {
     const customConfig: RunnerConfig = {
       ...defaultConfig,
-      parallelism: {
-        rules: [
-          { max_usage: 15, concurrency: 5 },
-          { max_usage: 55, concurrency: 2 },
-          { max_usage: 80, concurrency: 1 },
-          { max_usage: 100, concurrency: 0 },
-        ],
-      },
+      parallelism: [
+        { max_usage: 15, concurrency: 5 },
+        { max_usage: 55, concurrency: 2 },
+        { max_usage: 80, concurrency: 1 },
+        { max_usage: 100, concurrency: 0 },
+      ],
     };
 
     expect(resolveParallelism(10, customConfig)).toBe(5);

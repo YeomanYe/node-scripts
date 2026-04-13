@@ -10,7 +10,7 @@ import { log } from './log';
  * @returns 对应的并发度
  */
 export function resolveParallelism(usagePercent: number, config: RunnerConfig): number {
-  const matchedRule = config.parallelism.rules.find(rule => usagePercent <= rule.max_usage);
+  const matchedRule = config.parallelism.find(rule => usagePercent <= rule.max_usage);
   return matchedRule ? matchedRule.concurrency : 0;
 }
 

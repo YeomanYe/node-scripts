@@ -30,10 +30,6 @@ export interface ParallelismRule {
   concurrency: number;
 }
 
-export interface ParallelismConfig {
-  rules: ParallelismRule[];
-}
-
 export interface DefaultsConfig {
   model: string;
   sandbox_mode: SandboxMode;
@@ -44,7 +40,7 @@ export interface DefaultsConfig {
 
 export interface RunnerConfig {
   feishu: FeishuConfig;
-  parallelism: ParallelismConfig;
+  parallelism: ParallelismRule[];
   defaults: DefaultsConfig;
 }
 

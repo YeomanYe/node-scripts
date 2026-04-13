@@ -53,12 +53,6 @@ export interface ParallelismRule {
   concurrency: number;
 }
 
-/** 并发度配置（基于 API 用量百分比） */
-export interface ParallelismConfig {
-  /** 自定义规则列表，按 max_usage 升序匹配 */
-  rules: ParallelismRule[];
-}
-
 /** 默认配置 */
 export interface DefaultsConfig {
   /** 默认模型 */
@@ -78,7 +72,7 @@ export interface RunnerConfig {
   /** 飞书通知配置 */
   feishu: FeishuConfig;
   /** 并发度配置 */
-  parallelism: ParallelismConfig;
+  parallelism: ParallelismRule[];
   /** 默认值配置 */
   defaults: DefaultsConfig;
 }

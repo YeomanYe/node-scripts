@@ -30,14 +30,12 @@ describe('claude-task-runner/usage', () => {
       receive_id: '',
       receive_id_type: 'chat_id',
     },
-    parallelism: {
-      rules: [
-        { max_usage: 30, concurrency: 4 },
-        { max_usage: 50, concurrency: 3 },
-        { max_usage: 80, concurrency: 2 },
-        { max_usage: 100, concurrency: 0 },
-      ],
-    },
+    parallelism: [
+      { max_usage: 30, concurrency: 4 },
+      { max_usage: 50, concurrency: 3 },
+      { max_usage: 80, concurrency: 2 },
+      { max_usage: 100, concurrency: 0 },
+    ],
     defaults: {
       model: 'sonnet',
       max_budget_usd: 5,
@@ -66,14 +64,12 @@ describe('claude-task-runner/usage', () => {
     it('should use custom rule values from config', () => {
       const customConfig: RunnerConfig = {
         ...defaultConfig,
-        parallelism: {
-          rules: [
-            { max_usage: 10, concurrency: 10 },
-            { max_usage: 40, concurrency: 7 },
-            { max_usage: 70, concurrency: 3 },
-            { max_usage: 100, concurrency: 1 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 10, concurrency: 10 },
+          { max_usage: 40, concurrency: 7 },
+          { max_usage: 70, concurrency: 3 },
+          { max_usage: 100, concurrency: 1 },
+        ],
       };
 
       expect(resolveParallelism(10, customConfig)).toBe(10);
@@ -85,14 +81,12 @@ describe('claude-task-runner/usage', () => {
     it('should prefer configured rules when provided', () => {
       const customConfig: RunnerConfig = {
         ...defaultConfig,
-        parallelism: {
-          rules: [
-            { max_usage: 20, concurrency: 6 },
-            { max_usage: 60, concurrency: 3 },
-            { max_usage: 90, concurrency: 1 },
-            { max_usage: 100, concurrency: 0 },
-          ],
-        },
+        parallelism: [
+          { max_usage: 20, concurrency: 6 },
+          { max_usage: 60, concurrency: 3 },
+          { max_usage: 90, concurrency: 1 },
+          { max_usage: 100, concurrency: 0 },
+        ],
       };
 
       expect(resolveParallelism(10, customConfig)).toBe(6);
