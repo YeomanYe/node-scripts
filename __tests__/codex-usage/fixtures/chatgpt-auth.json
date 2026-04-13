@@ -1,0 +1,7 @@
+{
+  "tokens": {
+    "id_token": "eyJhbGciOiJIUzI1NiJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoid29ya3NwYWNlLTEyMyIsImNoYXRncHRfcGxhbl90eXBlIjoicHJvIn19.signature",
+    "access_token": "access-token",
+    "account_id": "workspace-123"
+  }
+}

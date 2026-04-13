@@ -9,7 +9,8 @@
     "sync-editor": "dist/sync-editor/index.js",
     "exec-recursive": "dist/exec-recursive/index.js",
     "claude-usage": "dist/claude-usage/index.js",
-    "claude-task-runner": "dist/claude-task-runner/index.js"
+    "claude-task-runner": "dist/claude-task-runner/index.js",
+    "codex-usage": "dist/codex-usage/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -35,6 +36,11 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "cli-table3": "^0.6.5",
+    "dayjs": "^1.11.13",
+    "jwt-decode": "^4.0.0",
+    "picocolors": "^1.1.1",
+    "zod": "^4.1.12",
     "yaml": "^2.8.2"
   }
 }

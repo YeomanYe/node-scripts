@@ -10,6 +10,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [sync-editor](#sync-editor) | VSCode / Cursor / Trae 配置同步 |
 | [exec-recursive](#exec-recursive) | 递归执行命令 |
 | [claude-usage](#claude-usage) | Claude API 用量查看 |
+| [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
 
 ## 安装
@@ -256,6 +257,38 @@ node dist/claude-usage/index.js --json
 需要已登录 Claude Code，自动从 macOS 钥匙串或 `~/.claude/.credentials.json` 获取凭证。
 
 详细文档：[docs/claude-usage.md](docs/claude-usage.md)
+
+---
+
+## Codex-Usage
+
+查看 Codex / ChatGPT 的 `/status` 风格用量信息，凭证来自本地 `~/.codex/auth.json`。
+
+### 使用方式
+
+```bash
+# 默认读取 ~/.codex/auth.json
+node dist/codex-usage/index.js
+
+# 监视模式（默认每 30 秒刷新）
+node dist/codex-usage/index.js --watch
+
+# 指定刷新间隔
+node dist/codex-usage/index.js --watch 15
+
+# 输出 JSON
+node dist/codex-usage/index.js --json
+
+# 自定义认证文件或接口地址
+node dist/codex-usage/index.js --auth-file /path/to/auth.json --base-url https://chatgpt.com/backend-api
+```
+
+### 输出内容
+
+- **Plan**：当前套餐类型
+- **Primary / Secondary**：主、副限流窗口使用率与重置时间
+- **Credits**：额度余额信息
+- **Additional**：附加限流项
 
 ---
 
