@@ -45,8 +45,18 @@ export interface FeishuConfig {
   receive_id_type: string;
 }
 
+/** 并发规则 */
+export interface ParallelismRule {
+  /** 当用量低于该百分比时生效 */
+  max_usage: number;
+  /** 对应并发数 */
+  concurrency: number;
+}
+
 /** 并发度配置（基于 API 用量百分比） */
 export interface ParallelismConfig {
+  /** 可选的自定义规则列表，按 max_usage 升序匹配 */
+  rules?: ParallelismRule[];
   /** 用量低于 30% 时的并发数 */
   below_30: number;
   /** 用量低于 50% 时的并发数 */

@@ -11,6 +11,12 @@ import { log } from './log';
  */
 export function resolveParallelism(usagePercent: number, config: RunnerConfig): number {
   const { parallelism } = config;
+  const rules = parallelism.rules ?? [];
+
+  if (rules.length > 0) {
+    const matchedRule = rules.find(rule => usagePercent < rule.max_usage);
+    return matchedRule ? matchedRule.concurrency : parallelism.above_80;
+  }
 
   if (usagePercent < 30) {
     return parallelism.below_30;

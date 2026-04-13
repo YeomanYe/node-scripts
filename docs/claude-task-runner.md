@@ -10,6 +10,9 @@ node dist/claude-task-runner/index.js run <taskfile>
 
 # 指定自定义配置
 node dist/claude-task-runner/index.js run tasks.yaml -c my-config.yaml
+
+# 使用自定义百分比分段并发配置运行
+node dist/claude-task-runner/index.js run tasks.yaml -c local/claude-task-runner-config.yaml
 ```
 
 ## 任务文件格式
@@ -62,6 +65,15 @@ parallelism:
   below_80: 1      # 用量 < 80% → 串行执行
   above_80: 0      # 用量 >= 80% → 停止执行
 
+  # 可选：自定义阈值列表，按 max_usage 升序匹配
+  # rules:
+  #   - max_usage: 20
+  #     concurrency: 4
+  #   - max_usage: 50
+  #     concurrency: 2
+  #   - max_usage: 80
+  #     concurrency: 1
+
 # 默认值
 defaults:
   model: sonnet
@@ -70,6 +82,11 @@ defaults:
   timeout_minutes: 15
   on_failure: continue                  # continue | stop
 ```
+
+说明：
+- 未配置 `rules` 时，继续使用 `below_30/below_50/below_80/above_80`
+- 配置了 `rules` 时，按“当前用量 `< max_usage`”命中第一条规则
+- 超过最后一条规则时，回退到 `above_80`
 
 ## 执行流程
 

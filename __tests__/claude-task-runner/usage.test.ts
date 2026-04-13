@@ -70,7 +70,7 @@ describe('claude-task-runner/usage', () => {
       expect(resolveParallelism(100, defaultConfig)).toBe(0);
     });
 
-    it('should use custom parallelism values from config', () => {
+    it('should use custom parallelism values from legacy config', () => {
       const customConfig: RunnerConfig = {
         ...defaultConfig,
         parallelism: {
@@ -85,6 +85,29 @@ describe('claude-task-runner/usage', () => {
       expect(resolveParallelism(40, customConfig)).toBe(7);
       expect(resolveParallelism(60, customConfig)).toBe(3);
       expect(resolveParallelism(90, customConfig)).toBe(1);
+    });
+
+    it('should prefer configured rules when provided', () => {
+      const customConfig: RunnerConfig = {
+        ...defaultConfig,
+        parallelism: {
+          rules: [
+            { max_usage: 20, concurrency: 6 },
+            { max_usage: 60, concurrency: 3 },
+            { max_usage: 90, concurrency: 1 },
+          ],
+          above_80: 0,
+          below_30: 4,
+          below_50: 3,
+          below_80: 2,
+        },
+      };
+
+      expect(resolveParallelism(10, customConfig)).toBe(6);
+      expect(resolveParallelism(20, customConfig)).toBe(3);
+      expect(resolveParallelism(59.9, customConfig)).toBe(3);
+      expect(resolveParallelism(60, customConfig)).toBe(1);
+      expect(resolveParallelism(95, customConfig)).toBe(0);
     });
   });
 

@@ -82,6 +82,28 @@ describe('claude-task-runner/config', () => {
       expect(result.defaults.on_failure).toBe('continue');
     });
 
+    it('should preserve explicit parallelism rules', async () => {
+      const config = {
+        parallelism: {
+          rules: [
+            { max_usage: 25, concurrency: 5 },
+            { max_usage: 75, concurrency: 2 },
+          ],
+        },
+      };
+
+      const filePath = path.join(tmpDir, 'rules-config.yaml');
+      await fs.writeFile(filePath, YAML.stringify(config));
+
+      const result = await loadRunnerConfig(filePath);
+
+      expect(result.parallelism.rules).toEqual([
+        { max_usage: 25, concurrency: 5 },
+        { max_usage: 75, concurrency: 2 },
+      ]);
+      expect(result.parallelism.above_80).toBe(0);
+    });
+
     it('should apply all defaults when config is empty object', async () => {
       const filePath = path.join(tmpDir, 'empty-config.yaml');
       await fs.writeFile(filePath, YAML.stringify({}));

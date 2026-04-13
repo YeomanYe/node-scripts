@@ -12,6 +12,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [claude-usage](#claude-usage) | Claude API 用量查看 |
 | [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
+| [codex-task-runner](#codex-task-runner) | Codex 自动化任务调度 |
 
 ## 安装
 
@@ -292,6 +293,31 @@ node dist/codex-usage/index.js --auth-file /path/to/auth.json --base-url https:/
 
 ---
 
+## Codex-Task-Runner
+
+基于 Codex CLI 的任务批处理工具，调度逻辑与 `claude-task-runner` 类似，但并发度依据 `codex-usage` 动态调整。
+
+### 使用方式
+
+```bash
+# 执行任务文件
+node dist/codex-task-runner/index.js run tasks.yaml
+
+# 指定自定义配置
+node dist/codex-task-runner/index.js run tasks.yaml -c local/codex-task-runner-config.yaml
+```
+
+### 特性
+
+- 按优先级分批执行任务
+- 基于 Codex 主窗口用量动态控制并发度
+- 任务结果和批次摘要可发送到飞书
+- 成功任务写入 `.state.json`，重复执行自动跳过
+
+详细文档：[docs/codex-task-runner.md](docs/codex-task-runner.md)
+
+---
+
 ## Claude-Task-Runner
 
 基于 Claude Code CLI 的自动化任务调度工具，支持动态并行执行、API 用量自适应调度、飞书实时通知。
@@ -325,7 +351,7 @@ tasks:
 
 ### 核心特性
 
-- **动态并行**：根据 API 用量自动调整并发度（< 30% → 3 并发，< 50% → 2，< 80% → 1，≥ 80% → 停止）
+- **动态并行**：根据 API 用量自动调整并发度，支持默认四档或自定义百分比分段
 - **飞书通知**：每个任务完成立刻通知，每批次发送总结，最终报告
 - **用量保护**：每批次执行前重新检查用量，超限自动停止
 - **失败策略**：支持 `continue`（继续）或 `stop`（停止）
@@ -347,6 +373,15 @@ parallelism:
   below_50: 2
   below_80: 1
   above_80: 0
+
+  # 可选：自定义分段规则，配置后优先于上面的四档
+  # rules:
+  #   - max_usage: 20
+  #     concurrency: 4
+  #   - max_usage: 40
+  #     concurrency: 2
+  #   - max_usage: 80
+  #     concurrency: 1
 
 defaults:
   model: sonnet

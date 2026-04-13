@@ -3,10 +3,8 @@ import path from 'path';
 import YAML from 'yaml';
 import { RunnerConfig, TaskFile } from './types';
 
-/** 默认配置文件路径（相对于项目根目录） */
-const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/claude-task-runner-config.yaml');
+const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/codex-task-runner-config.yaml');
 
-/** 默认运行器配置 */
 const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
   feishu: {
     app_id: '',
@@ -22,19 +20,14 @@ const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
     above_80: 0,
   },
   defaults: {
-    model: 'sonnet',
-    max_budget_usd: 5,
-    permission_mode: 'bypassPermissions',
+    model: 'gpt-5.4',
+    sandbox_mode: 'workspace-write',
+    dangerously_bypass_approvals_and_sandbox: false,
     timeout_minutes: 30,
     on_failure: 'continue',
   },
 };
 
-/**
- * 合并配置对象，用用户配置覆盖默认值
- * @param userConfig - 用户提供的部分配置
- * @returns 完整的运行器配置
- */
 function mergeConfig(userConfig: Partial<RunnerConfig>): RunnerConfig {
   const mergedParallelism = {
     ...DEFAULT_RUNNER_CONFIG.parallelism,
@@ -57,11 +50,6 @@ function mergeConfig(userConfig: Partial<RunnerConfig>): RunnerConfig {
   };
 }
 
-/**
- * 加载运行器配置文件
- * @param configPath - 配置文件路径，不传则使用默认路径
- * @returns 完整的运行器配置
- */
 export async function loadRunnerConfig(configPath?: string): Promise<RunnerConfig> {
   const filePath = configPath ? path.resolve(configPath) : DEFAULT_CONFIG_PATH;
 
@@ -86,11 +74,6 @@ export async function loadRunnerConfig(configPath?: string): Promise<RunnerConfi
   }
 }
 
-/**
- * 验证任务配置是否有效
- * @param task - 未知数据
- * @param index - 任务索引
- */
 function validateTask(task: unknown, index: number): void {
   if (typeof task !== 'object' || task === null) {
     throw new Error(`任务 #${index} 格式无效：不是对象`);
@@ -107,11 +90,6 @@ function validateTask(task: unknown, index: number): void {
   }
 }
 
-/**
- * 加载任务文件
- * @param taskFilePath - 任务文件路径
- * @returns 解析后的任务文件
- */
 export async function loadTaskFile(taskFilePath: string): Promise<TaskFile> {
   const filePath = path.resolve(taskFilePath);
 
