@@ -31,11 +31,7 @@ export interface ParallelismRule {
 }
 
 export interface ParallelismConfig {
-  rules?: ParallelismRule[];
-  below_30: number;
-  below_50: number;
-  below_80: number;
-  above_80: number;
+  rules: ParallelismRule[];
 }
 
 export interface DefaultsConfig {

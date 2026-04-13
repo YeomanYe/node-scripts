@@ -16,10 +16,12 @@ const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
     receive_id_type: 'chat_id',
   },
   parallelism: {
-    below_30: 4,
-    below_50: 3,
-    below_80: 2,
-    above_80: 0,
+    rules: [
+      { max_usage: 30, concurrency: 4 },
+      { max_usage: 50, concurrency: 3 },
+      { max_usage: 80, concurrency: 2 },
+      { max_usage: 100, concurrency: 0 },
+    ],
   },
   defaults: {
     model: 'sonnet',
@@ -36,20 +38,16 @@ const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
  * @returns 完整的运行器配置
  */
 function mergeConfig(userConfig: Partial<RunnerConfig>): RunnerConfig {
-  const mergedParallelism = {
-    ...DEFAULT_RUNNER_CONFIG.parallelism,
-    ...(userConfig.parallelism ?? {}),
-  };
-  const rules = Array.isArray(mergedParallelism.rules)
-    ? [...mergedParallelism.rules].sort((a, b) => a.max_usage - b.max_usage)
-    : undefined;
+  const rules = Array.isArray(userConfig.parallelism?.rules) && userConfig.parallelism.rules.length > 0
+    ? [...userConfig.parallelism.rules].sort((a, b) => a.max_usage - b.max_usage)
+    : DEFAULT_RUNNER_CONFIG.parallelism.rules;
 
   return {
     feishu: {
       ...DEFAULT_RUNNER_CONFIG.feishu,
       ...(userConfig.feishu ?? {}),
     },
-    parallelism: { ...mergedParallelism, rules },
+    parallelism: { rules },
     defaults: {
       ...DEFAULT_RUNNER_CONFIG.defaults,
       ...(userConfig.defaults ?? {}),

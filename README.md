@@ -351,7 +351,7 @@ tasks:
 
 ### 核心特性
 
-- **动态并行**：根据 API 用量自动调整并发度，支持默认四档或自定义百分比分段
+- **动态并行**：根据 API 用量按自定义百分比分段调整并发度
 - **飞书通知**：每个任务完成立刻通知，每批次发送总结，最终报告
 - **用量保护**：每批次执行前重新检查用量，超限自动停止
 - **失败策略**：支持 `continue`（继续）或 `stop`（停止）
@@ -369,19 +369,13 @@ feishu:
   receive_id_type: "chat_id"
 
 parallelism:
-  below_30: 3
-  below_50: 2
-  below_80: 1
-  above_80: 0
-
-  # 可选：自定义分段规则，配置后优先于上面的四档
-  # rules:
-  #   - max_usage: 20
-  #     concurrency: 4
-  #   - max_usage: 40
-  #     concurrency: 2
-  #   - max_usage: 80
-  #     concurrency: 1
+  rules:
+    - max_usage: 20
+      concurrency: 4
+    - max_usage: 40
+      concurrency: 2
+    - max_usage: 100
+      concurrency: 0
 
 defaults:
   model: sonnet

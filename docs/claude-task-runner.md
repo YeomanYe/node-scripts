@@ -60,19 +60,13 @@ feishu:
 
 # 并行策略（基于 5 小时窗口 API 用量）
 parallelism:
-  below_30: 3      # 用量 < 30% → 并行 3 个任务
-  below_50: 2      # 用量 < 50% → 并行 2 个任务
-  below_80: 1      # 用量 < 80% → 串行执行
-  above_80: 0      # 用量 >= 80% → 停止执行
-
-  # 可选：自定义阈值列表，按 max_usage 升序匹配
-  # rules:
-  #   - max_usage: 20
-  #     concurrency: 4
-  #   - max_usage: 50
-  #     concurrency: 2
-  #   - max_usage: 80
-  #     concurrency: 1
+  rules:
+    - max_usage: 20
+      concurrency: 4
+    - max_usage: 50
+      concurrency: 2
+    - max_usage: 100
+      concurrency: 0
 
 # 默认值
 defaults:
@@ -84,9 +78,9 @@ defaults:
 ```
 
 说明：
-- 未配置 `rules` 时，继续使用 `below_30/below_50/below_80/above_80`
-- 配置了 `rules` 时，按“当前用量 `< max_usage`”命中第一条规则
-- 超过最后一条规则时，回退到 `above_80`
+- `rules` 是唯一的并发配置来源，按 `max_usage` 升序匹配
+- 命中规则的条件是“当前用量 `<= max_usage`”
+- 想在 80% 以上停止执行，可以把最后一条写成 `max_usage: 100, concurrency: 0`
 
 ## 执行流程
 

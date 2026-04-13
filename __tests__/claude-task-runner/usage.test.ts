@@ -31,10 +31,12 @@ describe('claude-task-runner/usage', () => {
       receive_id_type: 'chat_id',
     },
     parallelism: {
-      below_30: 4,
-      below_50: 3,
-      below_80: 2,
-      above_80: 0,
+      rules: [
+        { max_usage: 30, concurrency: 4 },
+        { max_usage: 50, concurrency: 3 },
+        { max_usage: 80, concurrency: 2 },
+        { max_usage: 100, concurrency: 0 },
+      ],
     },
     defaults: {
       model: 'sonnet',
@@ -46,38 +48,31 @@ describe('claude-task-runner/usage', () => {
   };
 
   describe('resolveParallelism', () => {
-    it('should return below_30 parallelism when usage < 30%', () => {
+    it('should resolve the first matching rule', () => {
       expect(resolveParallelism(0, defaultConfig)).toBe(4);
       expect(resolveParallelism(15, defaultConfig)).toBe(4);
-      expect(resolveParallelism(29.9, defaultConfig)).toBe(4);
-    });
-
-    it('should return below_50 parallelism when 30% <= usage < 50%', () => {
-      expect(resolveParallelism(30, defaultConfig)).toBe(3);
+      expect(resolveParallelism(30, defaultConfig)).toBe(4);
+      expect(resolveParallelism(30.1, defaultConfig)).toBe(3);
       expect(resolveParallelism(40, defaultConfig)).toBe(3);
-      expect(resolveParallelism(49.9, defaultConfig)).toBe(3);
-    });
-
-    it('should return below_80 parallelism when 50% <= usage < 80%', () => {
-      expect(resolveParallelism(50, defaultConfig)).toBe(2);
+      expect(resolveParallelism(50, defaultConfig)).toBe(3);
+      expect(resolveParallelism(50.1, defaultConfig)).toBe(2);
       expect(resolveParallelism(65, defaultConfig)).toBe(2);
-      expect(resolveParallelism(79.9, defaultConfig)).toBe(2);
-    });
-
-    it('should return above_80 parallelism when usage >= 80%', () => {
-      expect(resolveParallelism(80, defaultConfig)).toBe(0);
+      expect(resolveParallelism(80, defaultConfig)).toBe(2);
+      expect(resolveParallelism(80.1, defaultConfig)).toBe(0);
       expect(resolveParallelism(90, defaultConfig)).toBe(0);
       expect(resolveParallelism(100, defaultConfig)).toBe(0);
     });
 
-    it('should use custom parallelism values from legacy config', () => {
+    it('should use custom rule values from config', () => {
       const customConfig: RunnerConfig = {
         ...defaultConfig,
         parallelism: {
-          below_30: 10,
-          below_50: 7,
-          below_80: 3,
-          above_80: 1,
+          rules: [
+            { max_usage: 10, concurrency: 10 },
+            { max_usage: 40, concurrency: 7 },
+            { max_usage: 70, concurrency: 3 },
+            { max_usage: 100, concurrency: 1 },
+          ],
         },
       };
 
@@ -95,18 +90,16 @@ describe('claude-task-runner/usage', () => {
             { max_usage: 20, concurrency: 6 },
             { max_usage: 60, concurrency: 3 },
             { max_usage: 90, concurrency: 1 },
+            { max_usage: 100, concurrency: 0 },
           ],
-          above_80: 0,
-          below_30: 4,
-          below_50: 3,
-          below_80: 2,
         },
       };
 
       expect(resolveParallelism(10, customConfig)).toBe(6);
-      expect(resolveParallelism(20, customConfig)).toBe(3);
-      expect(resolveParallelism(59.9, customConfig)).toBe(3);
-      expect(resolveParallelism(60, customConfig)).toBe(1);
+      expect(resolveParallelism(20, customConfig)).toBe(6);
+      expect(resolveParallelism(20.1, customConfig)).toBe(3);
+      expect(resolveParallelism(60, customConfig)).toBe(3);
+      expect(resolveParallelism(60.1, customConfig)).toBe(1);
       expect(resolveParallelism(95, customConfig)).toBe(0);
     });
   });
@@ -133,7 +126,7 @@ describe('claude-task-runner/usage', () => {
 
       const result = await getParallelism(defaultConfig);
 
-      expect(result.parallelism).toBe(4); // below_30
+      expect(result.parallelism).toBe(4);
       expect(result.usage).toBe(25);
     });
 
@@ -154,7 +147,7 @@ describe('claude-task-runner/usage', () => {
 
       const result = await getParallelism(defaultConfig);
 
-      expect(result.parallelism).toBe(0); // above_80
+      expect(result.parallelism).toBe(0);
       expect(result.usage).toBe(85);
     });
 

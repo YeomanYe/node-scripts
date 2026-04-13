@@ -26,10 +26,11 @@ describe('claude-task-runner/config', () => {
           receive_id_type: 'chat_id',
         },
         parallelism: {
-          below_30: 5,
-          below_50: 3,
-          below_80: 1,
-          above_80: 0,
+          rules: [
+            { max_usage: 30, concurrency: 5 },
+            { max_usage: 80, concurrency: 1 },
+            { max_usage: 100, concurrency: 0 },
+          ],
         },
         defaults: {
           model: 'opus',
@@ -46,7 +47,11 @@ describe('claude-task-runner/config', () => {
       const result = await loadRunnerConfig(filePath);
 
       expect(result.feishu.app_id).toBe('test-app');
-      expect(result.parallelism.below_30).toBe(5);
+      expect(result.parallelism.rules).toEqual([
+        { max_usage: 30, concurrency: 5 },
+        { max_usage: 80, concurrency: 1 },
+        { max_usage: 100, concurrency: 0 },
+      ]);
       expect(result.defaults.model).toBe('opus');
       expect(result.defaults.on_failure).toBe('stop');
     });
@@ -68,11 +73,12 @@ describe('claude-task-runner/config', () => {
       expect(result.feishu.domain).toBe('https://open.feishu.cn');
       expect(result.feishu.receive_id_type).toBe('chat_id');
 
-      // parallelism defaults
-      expect(result.parallelism.below_30).toBe(4);
-      expect(result.parallelism.below_50).toBe(3);
-      expect(result.parallelism.below_80).toBe(2);
-      expect(result.parallelism.above_80).toBe(0);
+      expect(result.parallelism.rules).toEqual([
+        { max_usage: 30, concurrency: 4 },
+        { max_usage: 50, concurrency: 3 },
+        { max_usage: 80, concurrency: 2 },
+        { max_usage: 100, concurrency: 0 },
+      ]);
 
       // defaults defaults
       expect(result.defaults.model).toBe('sonnet');
@@ -101,7 +107,6 @@ describe('claude-task-runner/config', () => {
         { max_usage: 25, concurrency: 5 },
         { max_usage: 75, concurrency: 2 },
       ]);
-      expect(result.parallelism.above_80).toBe(0);
     });
 
     it('should apply all defaults when config is empty object', async () => {
@@ -111,7 +116,12 @@ describe('claude-task-runner/config', () => {
       const result = await loadRunnerConfig(filePath);
 
       expect(result.feishu.app_id).toBe('');
-      expect(result.parallelism.below_30).toBe(4);
+      expect(result.parallelism.rules).toEqual([
+        { max_usage: 30, concurrency: 4 },
+        { max_usage: 50, concurrency: 3 },
+        { max_usage: 80, concurrency: 2 },
+        { max_usage: 100, concurrency: 0 },
+      ]);
       expect(result.defaults.model).toBe('sonnet');
     });
 

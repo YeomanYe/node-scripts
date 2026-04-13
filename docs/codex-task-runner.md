@@ -45,19 +45,13 @@ feishu:
   receive_id_type: "chat_id"
 
 parallelism:
-  below_30: 4
-  below_50: 3
-  below_80: 2
-  above_80: 0
-
-  # 可选：自定义阈值列表，配置后优先于上面的四档
-  # rules:
-  #   - max_usage: 15
-  #     concurrency: 4
-  #   - max_usage: 35
-  #     concurrency: 2
-  #   - max_usage: 80
-  #     concurrency: 1
+  rules:
+    - max_usage: 15
+      concurrency: 4
+    - max_usage: 35
+      concurrency: 2
+    - max_usage: 100
+      concurrency: 0
 
 defaults:
   model: gpt-5.4
@@ -68,9 +62,9 @@ defaults:
 ```
 
 说明：
-- 未配置 `rules` 时，使用默认四档分段
-- 配置了 `rules` 时，按“当前用量 `< max_usage`”命中第一条规则
-- 超过最后一条规则时，回退到 `above_80`
+- `rules` 是唯一的并发配置来源，按 `max_usage` 升序匹配
+- 命中规则的条件是“当前用量 `<= max_usage`”
+- 想在 80% 以上停止执行，可以把最后一条写成 `max_usage: 100, concurrency: 0`
 
 ## 说明
 

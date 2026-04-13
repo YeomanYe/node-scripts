@@ -10,24 +10,8 @@ import { log } from './log';
  * @returns 对应的并发度
  */
 export function resolveParallelism(usagePercent: number, config: RunnerConfig): number {
-  const { parallelism } = config;
-  const rules = parallelism.rules ?? [];
-
-  if (rules.length > 0) {
-    const matchedRule = rules.find(rule => usagePercent < rule.max_usage);
-    return matchedRule ? matchedRule.concurrency : parallelism.above_80;
-  }
-
-  if (usagePercent < 30) {
-    return parallelism.below_30;
-  }
-  if (usagePercent < 50) {
-    return parallelism.below_50;
-  }
-  if (usagePercent < 80) {
-    return parallelism.below_80;
-  }
-  return parallelism.above_80;
+  const matchedRule = config.parallelism.rules.find(rule => usagePercent <= rule.max_usage);
+  return matchedRule ? matchedRule.concurrency : 0;
 }
 
 /**

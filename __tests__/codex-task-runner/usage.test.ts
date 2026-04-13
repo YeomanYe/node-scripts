@@ -30,10 +30,12 @@ describe('codex-task-runner/usage', () => {
       receive_id_type: 'chat_id',
     },
     parallelism: {
-      below_30: 4,
-      below_50: 3,
-      below_80: 2,
-      above_80: 0,
+      rules: [
+        { max_usage: 30, concurrency: 4 },
+        { max_usage: 50, concurrency: 3 },
+        { max_usage: 80, concurrency: 2 },
+        { max_usage: 100, concurrency: 0 },
+      ],
     },
     defaults: {
       model: 'gpt-5.4',
@@ -46,8 +48,12 @@ describe('codex-task-runner/usage', () => {
 
   it('should resolve thresholds', () => {
     expect(resolveParallelism(10, defaultConfig)).toBe(4);
-    expect(resolveParallelism(40, defaultConfig)).toBe(3);
-    expect(resolveParallelism(60, defaultConfig)).toBe(2);
+    expect(resolveParallelism(30, defaultConfig)).toBe(4);
+    expect(resolveParallelism(30.1, defaultConfig)).toBe(3);
+    expect(resolveParallelism(50, defaultConfig)).toBe(3);
+    expect(resolveParallelism(50.1, defaultConfig)).toBe(2);
+    expect(resolveParallelism(80, defaultConfig)).toBe(2);
+    expect(resolveParallelism(80.1, defaultConfig)).toBe(0);
     expect(resolveParallelism(90, defaultConfig)).toBe(0);
   });
 
@@ -59,19 +65,18 @@ describe('codex-task-runner/usage', () => {
           { max_usage: 15, concurrency: 5 },
           { max_usage: 55, concurrency: 2 },
           { max_usage: 80, concurrency: 1 },
+          { max_usage: 100, concurrency: 0 },
         ],
-        below_30: 4,
-        below_50: 3,
-        below_80: 2,
-        above_80: 0,
       },
     };
 
     expect(resolveParallelism(10, customConfig)).toBe(5);
-    expect(resolveParallelism(15, customConfig)).toBe(2);
-    expect(resolveParallelism(54.9, customConfig)).toBe(2);
-    expect(resolveParallelism(79.9, customConfig)).toBe(1);
-    expect(resolveParallelism(80, customConfig)).toBe(0);
+    expect(resolveParallelism(15, customConfig)).toBe(5);
+    expect(resolveParallelism(15.1, customConfig)).toBe(2);
+    expect(resolveParallelism(55, customConfig)).toBe(2);
+    expect(resolveParallelism(55.1, customConfig)).toBe(1);
+    expect(resolveParallelism(80, customConfig)).toBe(1);
+    expect(resolveParallelism(80.1, customConfig)).toBe(0);
   });
 
   it('should use primary usage window', async () => {
