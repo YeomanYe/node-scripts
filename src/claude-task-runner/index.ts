@@ -40,7 +40,7 @@ async function handleRun(taskFilePath: string, options: CommandOptions): Promise
     const taskFile = await loadTaskFile(taskFilePath);
 
     log(`任务文件加载完成，共 ${taskFile.tasks.length} 个任务`);
-    await runTasks(taskFile, config);
+    await runTasks(taskFile, config, taskFilePath);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '未知错误';
     logError(message);

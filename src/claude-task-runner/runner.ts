@@ -3,6 +3,7 @@ import { getParallelism } from './usage';
 import { executeTask } from './executor';
 import { sendFeishuCard } from './feishu';
 import { log, logError } from './log';
+import { loadState, saveTaskSuccess, isTaskCompleted } from './state';
 
 /**
  * 格式化持续时间为可读字符串
@@ -136,15 +137,31 @@ async function executeBatch(
  * 执行全部任务
  * @param taskFile - 任务文件
  * @param config - 运行器配置
+ * @param taskFilePath - 任务文件路径（用于状态持久化）
  */
-export async function runTasks(taskFile: TaskFile, config: RunnerConfig): Promise<void> {
+export async function runTasks(taskFile: TaskFile, config: RunnerConfig, taskFilePath: string): Promise<void> {
   const startTime = Date.now();
   const allResults: TaskResult[] = [];
   let stopped = false;
 
-  // 按优先级排序
+  // 加载已有任务状态
+  const state = loadState(taskFilePath);
+
+  // 按优先级排序，然后分离已完成和待执行任务
   const sortedTasks = sortByPriority(taskFile.tasks);
-  const totalCount = sortedTasks.length;
+  const skippedTasks = sortedTasks.filter(({ task }) => isTaskCompleted(state, task.name));
+  const pendingTasks = sortedTasks.filter(({ task }) => !isTaskCompleted(state, task.name));
+
+  if (skippedTasks.length > 0) {
+    log(`跳过 ${skippedTasks.length} 个已完成任务: ${skippedTasks.map(({ task }) => task.name).join(', ')}`);
+  }
+
+  const totalCount = pendingTasks.length;
+
+  if (totalCount === 0) {
+    log('全部任务均已完成，无需执行');
+    return;
+  }
 
   log(`共 ${totalCount} 个任务待执行`);
 
@@ -162,7 +179,7 @@ export async function runTasks(taskFile: TaskFile, config: RunnerConfig): Promis
   }
 
   // 发送开始通知
-  const taskNames = sortedTasks.map(({ task }, i) => `${i + 1}. ${task.name}`).join('\n');
+  const taskNames = pendingTasks.map(({ task }, i) => `${i + 1}. ${task.name}`).join('\n');
   await sendFeishuCard(
     config.feishu,
     '\u{1F680} 任务开始执行',
@@ -195,7 +212,7 @@ export async function runTasks(taskFile: TaskFile, config: RunnerConfig): Promis
 
     // 取出当前批次
     const batchEnd = Math.min(pointer + currentParallelism, totalCount);
-    const batch = sortedTasks.slice(pointer, batchEnd);
+    const batch = pendingTasks.slice(pointer, batchEnd);
 
     log(`--- 批次 #${batchIndex + 1}: 执行 ${batch.length} 个任务 (并发度: ${currentParallelism}) ---`);
 
@@ -203,8 +220,11 @@ export async function runTasks(taskFile: TaskFile, config: RunnerConfig): Promis
     const batchResults = await executeBatch(batch, config.defaults);
     allResults.push(...batchResults);
 
-    // 发送每个任务的结果通知
+    // 保存成功任务的状态，并发送每个任务的结果通知
     for (const result of batchResults) {
+      if (result.status === 'success') {
+        saveTaskSuccess(taskFilePath, result.name);
+      }
       await sendFeishuCard(
         config.feishu,
         `${result.emoji} 任务完成: ${result.name}`,
@@ -215,7 +235,7 @@ export async function runTasks(taskFile: TaskFile, config: RunnerConfig): Promis
     // 检查是否有任务失败且需要停止
     const failedResults = batchResults.filter(r => r.status !== 'success');
     const shouldStop = failedResults.some(r => {
-      const taskEntry = sortedTasks.find(t => t.originalIndex === r.index);
+      const taskEntry = pendingTasks.find(t => t.originalIndex === r.index);
       const onFailure = taskEntry?.task.on_failure ?? config.defaults.on_failure;
       return onFailure === 'stop';
     });
