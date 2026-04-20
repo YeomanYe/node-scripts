@@ -157,5 +157,4 @@ export async function runPoll(options: RunPollOptions): Promise<void> {
     }
     void tick();
   }, options.intervalSec * 1000);
-  handle.unref();
 }
