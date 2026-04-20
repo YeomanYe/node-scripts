@@ -1,6 +1,6 @@
 # codex-usage
 
-查看 Codex API 用量的命令行工具。通过 Anthropic API 获取实时用量数据，彩色终端显示。
+查看 Codex / ChatGPT 用量的命令行工具。复用本地 ChatGPT 登录态访问 `chatgpt.com/backend-api/wham/usage`，表格形式显示。
 
 ## 使用方式
 
@@ -16,38 +16,35 @@ node dist/codex-usage/index.js -w 10
 
 # JSON 格式输出
 node dist/codex-usage/index.js --json
+
+# 指定 auth 文件或 base URL
+node dist/codex-usage/index.js --auth-file ~/.codex/auth.json
+node dist/codex-usage/index.js --base-url https://chatgpt.com/backend-api
 ```
 
 ## 显示内容
 
 | 指标 | 说明 |
 |------|------|
-| Primary | Primary 窗口的用量百分比 |
-| Secondary | Secondary 窗口的用量百分比 |
-| Extra Usage | 额外购买额度的使用情况 |
-
-进度条颜色：
-- 绿色：< 50%
-- 黄色：50% - 80%
-- 红色：> 80%
+| Plan | ChatGPT 订阅类型 |
+| Primary | 主窗口的用量百分比与重置时间 |
+| Secondary | 次窗口的用量百分比与重置时间 |
+| Credits | 额外额度余额 |
+| Additional | 其他按 feature 计量的限额 |
 
 ## 凭证获取
 
-自动按以下优先级获取 OAuth 凭证：
-1. macOS 钥匙串（`Claude Code-credentials`）
-2. 文件（`~/.claude/.credentials.json`）
-
-需要已登录 Claude Code。
+默认从 `~/.codex/auth.json` 读取已登录的 ChatGPT OAuth 凭证（可通过 `--auth-file` 覆盖）。需要已完成 `codex` CLI 登录。
 
 ## 模块结构
 
 ```
 src/codex-usage/
-├── index.ts          CLI 入口
-├── types.ts          类型定义
-├── credentials.ts    OAuth 凭证读取
-├── api.ts            用量 API 调用
-└── display.ts        彩色终端显示
+├── index.ts     CLI 入口
+├── types.ts     类型定义
+├── auth.ts      auth.json 读取
+├── usage.ts     用量 API 调用
+└── format.ts    表格格式化
 ```
 
 ## 轮询 + 通知 + PM2 自启
