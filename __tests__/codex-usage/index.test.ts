@@ -1,16 +1,17 @@
-import { parseWatchInterval } from '../../src/codex-usage/index';
+import { parseSeconds } from '../../src/codex-usage/index';
 
 describe('codex-usage/index', () => {
-  it('uses 30 seconds when --watch has no explicit value', () => {
-    expect(parseWatchInterval(true)).toBe(30);
+  it('uses default seconds when raw is true', () => {
+    expect(parseSeconds(true, 30)).toBe(30);
+    expect(parseSeconds(true, 300)).toBe(300);
   });
 
-  it('parses an explicit watch interval', () => {
-    expect(parseWatchInterval('15')).toBe(15);
+  it('parses an explicit interval', () => {
+    expect(parseSeconds('15', 30)).toBe(15);
   });
 
-  it('throws for invalid watch interval', () => {
-    expect(() => parseWatchInterval('0')).toThrow('watch interval must be a positive integer');
-    expect(() => parseWatchInterval('abc')).toThrow('watch interval must be a positive integer');
+  it('throws for invalid interval', () => {
+    expect(() => parseSeconds('0', 30)).toThrow('interval must be a positive integer');
+    expect(() => parseSeconds('abc', 30)).toThrow('interval must be a positive integer');
   });
 });
