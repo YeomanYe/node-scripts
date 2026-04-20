@@ -8,8 +8,8 @@ export function buildNotifiers(channels: ChannelConfig[]): Notifier[] {
       case 'feishu':
         return new FeishuNotifier(channel);
       default: {
-        const exhaustive: never = channel;
-        throw new Error(`未知通道类型: ${JSON.stringify(exhaustive)}`);
+        const _exhaustive = channel as never;
+        throw new Error(`未知通道类型: ${JSON.stringify(_exhaustive)}`);
       }
     }
   });
