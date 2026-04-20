@@ -5,29 +5,23 @@ import { CommandOptions } from './types';
 import { getCredentials } from './credentials';
 import { fetchUsage } from './api';
 import { displayUsage, clearScreen } from './display';
+import { loadPollConfig, DEFAULT_CONFIG_PATH } from './config';
+import { runPoll } from './poll';
 
 /** 是否正在关闭 */
-let isShuttingDown = false;
+const stopSignal = { stopped: false };
 
-/**
- * 设置进程信号处理
- */
 function setupSignalHandlers(): void {
   const cleanup = () => {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
+    if (stopSignal.stopped) return;
+    stopSignal.stopped = true;
     process.stdout.write('\n');
     process.exit(0);
   };
-
   process.on('SIGTERM', cleanup);
   process.on('SIGINT', cleanup);
 }
 
-/**
- * 获取并显示用量信息
- * @param options - 命令行选项
- */
 async function showUsage(options: CommandOptions): Promise<void> {
   try {
     const credentials = await getCredentials();
@@ -46,21 +40,13 @@ async function showUsage(options: CommandOptions): Promise<void> {
   }
 }
 
-/**
- * 以监视模式定期刷新用量信息
- * @param intervalSeconds - 刷新间隔（秒）
- * @param options - 命令行选项
- */
 async function watchUsage(intervalSeconds: number, options: CommandOptions): Promise<void> {
   const run = async (): Promise<void> => {
-    if (isShuttingDown) return;
-
+    if (stopSignal.stopped) return;
     clearScreen();
-
     try {
       const credentials = await getCredentials();
       const usage = await fetchUsage(credentials.accessToken);
-
       if (options.json) {
         process.stdout.write(JSON.stringify(usage, null, 2) + '\n');
       } else {
@@ -74,16 +60,19 @@ async function watchUsage(intervalSeconds: number, options: CommandOptions): Pro
   };
 
   await run();
-
-  setInterval(() => {
-    void run();
-  }, intervalSeconds * 1000);
+  setInterval(() => { void run(); }, intervalSeconds * 1000);
 }
 
-// 初始化信号处理
+function parseSeconds(raw: string | true, defaultSec: number): number {
+  const seconds = raw === true ? defaultSec : parseInt(raw, 10);
+  if (isNaN(seconds) || seconds < 1) {
+    throw new Error('间隔必须为正整数');
+  }
+  return seconds;
+}
+
 setupSignalHandlers();
 
-// 初始化 Commander
 const program = new Command();
 
 program
@@ -91,23 +80,53 @@ program
   .description('Display Claude API usage and quota information')
   .version('1.0.0')
   .option('-w, --watch [seconds]', 'Watch mode: refresh every N seconds (default: 30)')
+  .option('-p, --poll [seconds]', 'Headless poll mode: fetch every N seconds and dispatch to channels (default: 300)')
+  .option('-c, --config <path>', 'Poll config path (default: ./local/claude-usage-config.yaml)')
   .option('--json', 'Output raw JSON')
-  .action(async (options: { watch?: string | true; json?: boolean }) => {
-    const commandOptions: CommandOptions = {
-      json: options.json ?? false,
-    };
+  .action(async (options: {
+    watch?: string | true;
+    poll?: string | true;
+    config?: string;
+    json?: boolean;
+  }) => {
+    if (options.watch !== undefined && options.poll !== undefined) {
+      process.stderr.write('错误: --watch 与 --poll 互斥\n');
+      process.exit(1);
+    }
 
-    if (options.watch !== undefined) {
-      const seconds = options.watch === true ? 30 : parseInt(options.watch, 10);
-      if (isNaN(seconds) || seconds < 1) {
-        process.stderr.write('错误: watch 间隔必须为正整数\n');
+    if (options.poll !== undefined) {
+      try {
+        const seconds = parseSeconds(options.poll, 300);
+        const configPath = options.config ?? DEFAULT_CONFIG_PATH;
+        const config = await loadPollConfig(configPath);
+        const intervalSec = seconds !== 300 ? seconds : config.poll.interval_seconds;
+        process.stdout.write(
+          `[${new Date().toISOString()}] claude-usage poll started (interval=${intervalSec}s, channels=${config.channels.length})\n`
+        );
+        await runPoll({ intervalSec, config, signal: stopSignal });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '未知错误';
+        process.stderr.write(`错误: ${message}\n`);
         process.exit(1);
       }
-      await watchUsage(seconds, commandOptions);
-    } else {
-      await showUsage(commandOptions);
+      return;
     }
+
+    const commandOptions: CommandOptions = { json: options.json ?? false };
+
+    if (options.watch !== undefined) {
+      try {
+        const seconds = parseSeconds(options.watch, 30);
+        await watchUsage(seconds, commandOptions);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '未知错误';
+        process.stderr.write(`错误: ${message}\n`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    await showUsage(commandOptions);
   });
 
-// 解析命令行参数
 program.parse(process.argv);
