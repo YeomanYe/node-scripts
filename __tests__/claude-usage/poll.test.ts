@@ -1,5 +1,6 @@
-import { buildPollReport } from '../../src/claude-usage/poll';
+import { buildPollReport, runOnce } from '../../src/claude-usage/poll';
 import type { UsageData } from '../../src/claude-usage/types';
+import type { Notifier } from '../../src/shared/notifiers/types';
 
 const now = 1_700_000_000_000;
 const FIVE_H = 5 * 3600 * 1000;
@@ -73,5 +74,49 @@ describe('claude-usage buildPollReport', () => {
       tier: 'default',
     });
     expect(report.level).toBe('info');
+  });
+});
+
+describe('claude-usage runOnce', () => {
+  test('logs notifier rejections without failing the batch', async () => {
+    const logLines: string[] = [];
+    const errLines: string[] = [];
+
+    const goodNotifier: Notifier = {
+      name: 'good',
+      send: jest.fn().mockResolvedValue(undefined),
+    };
+    const badNotifier: Notifier = {
+      name: 'bad',
+      send: jest.fn().mockRejectedValue(new Error('boom')),
+    };
+
+    await runOnce({
+      config: {
+        poll: { interval_seconds: 1 },
+        alert: { windows: ['five_hour'] },
+        channels: [],
+      },
+      fetcher: async () => ({
+        usage: {
+          fiveHour: { utilization: 30, resetsAt: new Date(Date.now() + 3600_000).toISOString() },
+          sevenDay: { utilization: 10, resetsAt: new Date(Date.now() + 3600_000).toISOString() },
+          sevenDaySonnet: null,
+          sevenDayOpus: null,
+          sevenDayCowork: null,
+          extraUsage: null,
+        },
+        subscription: 'pro',
+        tier: 'default',
+      }),
+      notifiers: [goodNotifier, badNotifier],
+      logLine: (l) => logLines.push(l),
+      logError: (l) => errLines.push(l),
+    });
+
+    expect(goodNotifier.send).toHaveBeenCalledTimes(1);
+    expect(badNotifier.send).toHaveBeenCalledTimes(1);
+    expect(errLines.some((l) => l.includes('bad') && l.includes('boom'))).toBe(true);
+    expect(logLines.some((l) => l.includes('five_hour='))).toBe(true);
   });
 });
