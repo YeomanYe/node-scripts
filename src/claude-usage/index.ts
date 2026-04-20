@@ -71,62 +71,75 @@ function parseSeconds(raw: string | true, defaultSec: number): number {
   return seconds;
 }
 
-setupSignalHandlers();
+export function createProgram(): Command {
+  const program = new Command();
 
-const program = new Command();
-
-program
-  .name('claude-usage')
-  .description('Display Claude API usage and quota information')
-  .version('1.0.0')
-  .option('-w, --watch [seconds]', 'Watch mode: refresh every N seconds (default: 30)')
-  .option('-p, --poll [seconds]', 'Headless poll mode: fetch every N seconds and dispatch to channels (default: 300)')
-  .option('-c, --config <path>', 'Poll config path (default: ./local/claude-usage-config.yaml)')
-  .option('--json', 'Output raw JSON')
-  .action(async (options: {
-    watch?: string | true;
-    poll?: string | true;
-    config?: string;
-    json?: boolean;
-  }) => {
-    if (options.watch !== undefined && options.poll !== undefined) {
-      process.stderr.write('错误: --watch 与 --poll 互斥\n');
-      process.exit(1);
-    }
-
-    if (options.poll !== undefined) {
-      try {
-        const seconds = parseSeconds(options.poll, 300);
-        const configPath = options.config ?? DEFAULT_CONFIG_PATH;
-        const config = await loadPollConfig(configPath);
-        const intervalSec = seconds !== 300 ? seconds : config.poll.interval_seconds;
-        process.stdout.write(
-          `[${new Date().toISOString()}] claude-usage poll started (interval=${intervalSec}s, channels=${config.channels.length})\n`
-        );
-        await runPoll({ intervalSec, config, signal: stopSignal });
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : '未知错误';
-        process.stderr.write(`错误: ${message}\n`);
+  program
+    .name('claude-usage')
+    .description('Display Claude API usage and quota information')
+    .version('1.0.0')
+    .option('-w, --watch [seconds]', 'Watch mode: refresh every N seconds (default: 30)')
+    .option('-p, --poll [seconds]', 'Headless poll mode: fetch every N seconds and dispatch to channels (default: 300)')
+    .option('-c, --config <path>', 'Poll config path (default: ./local/claude-usage-config.yaml)')
+    .option('--json', 'Output raw JSON')
+    .action(async (options: {
+      watch?: string | true;
+      poll?: string | true;
+      config?: string;
+      json?: boolean;
+    }) => {
+      if (options.watch !== undefined && options.poll !== undefined) {
+        process.stderr.write('错误: --watch 与 --poll 互斥\n');
         process.exit(1);
       }
-      return;
-    }
 
-    const commandOptions: CommandOptions = { json: options.json ?? false };
-
-    if (options.watch !== undefined) {
-      try {
-        const seconds = parseSeconds(options.watch, 30);
-        await watchUsage(seconds, commandOptions);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : '未知错误';
-        process.stderr.write(`错误: ${message}\n`);
-        process.exit(1);
+      if (options.poll !== undefined) {
+        try {
+          const cliSecondsRaw = options.poll;
+          // options.poll === true means the flag was passed with no value → use config's interval_seconds.
+          // options.poll is a string → user explicitly provided seconds → use that value (even if it equals 300).
+          const configPath = options.config ?? DEFAULT_CONFIG_PATH;
+          const config = await loadPollConfig(configPath);
+          const intervalSec = cliSecondsRaw === true
+            ? config.poll.interval_seconds
+            : parseSeconds(cliSecondsRaw, 300);
+          process.stdout.write(
+            `[${new Date().toISOString()}] claude-usage poll started (interval=${intervalSec}s, channels=${config.channels.length})\n`
+          );
+          await runPoll({ intervalSec, config, signal: stopSignal });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : '未知错误';
+          process.stderr.write(`错误: ${message}\n`);
+          process.exit(1);
+        }
+        return;
       }
-      return;
-    }
 
-    await showUsage(commandOptions);
+      const commandOptions: CommandOptions = { json: options.json ?? false };
+
+      if (options.watch !== undefined) {
+        try {
+          const seconds = parseSeconds(options.watch, 30);
+          await watchUsage(seconds, commandOptions);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : '未知错误';
+          process.stderr.write(`错误: ${message}\n`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      await showUsage(commandOptions);
+    });
+
+  return program;
+}
+
+if (require.main === module) {
+  setupSignalHandlers();
+  createProgram().parseAsync(process.argv).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
   });
-
-program.parse(process.argv);
+}

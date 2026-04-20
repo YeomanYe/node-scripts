@@ -96,10 +96,14 @@ export function createProgram(): Command {
     }
 
     if (options.poll !== undefined) {
-      const seconds = parseSeconds(options.poll, 300);
+      const cliSecondsRaw = options.poll;
+      // options.poll === true means the flag was passed with no value → use config's interval_seconds.
+      // options.poll is a string → user explicitly provided seconds → use that value (even if it equals 300).
       const configPath = options.config ?? DEFAULT_CONFIG_PATH;
       const config = await loadPollConfig(configPath);
-      const intervalSec = seconds !== 300 ? seconds : config.poll.interval_seconds;
+      const intervalSec = cliSecondsRaw === true
+        ? config.poll.interval_seconds
+        : parseSeconds(cliSecondsRaw, 300);
       process.stdout.write(
         `[${new Date().toISOString()}] codex-usage poll started (interval=${intervalSec}s, channels=${config.channels.length})\n`
       );
