@@ -16,6 +16,12 @@ const WINDOWS: Record<CodexAlertWindow, WindowMeta> = {
   secondary: { label: 'Secondary', get: (s) => s.secondary },
 };
 
+function formatLocalTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export interface ReportOptions {
   windows: CodexAlertWindow[];
   nowMs: number;
@@ -42,8 +48,12 @@ export function buildPollReport(snapshot: UsageSnapshot, options: ReportOptions)
     const win = meta.get(snapshot);
     if (!win) continue;
 
+    const resetLabel = win.resetsAt && win.resetsAt > 0
+      ? ` ｜结束 ${formatLocalTime(win.resetsAt * 1000)}`
+      : '';
+
     if (!win.windowMinutes || win.windowMinutes <= 0) {
-      lines.push(`  ${meta.label}：${win.usedPercent.toFixed(1)}% ｜windowMinutes 未知，跳过告警判定`);
+      lines.push(`  ${meta.label}：${win.usedPercent.toFixed(1)}% ｜windowMinutes 未知，跳过告警判定${resetLabel}`);
       continue;
     }
 
@@ -61,14 +71,14 @@ export function buildPollReport(snapshot: UsageSnapshot, options: ReportOptions)
       ? `超 ${result.overBy.toFixed(1)}pp`
       : `差 ${result.overBy.toFixed(1)}pp`;
     lines.push(
-      `${prefix} ${meta.label}：${win.usedPercent.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}`
+      `${prefix} ${meta.label}：${win.usedPercent.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}${resetLabel}`
     );
   }
 
   const alerts = entries.filter((e) => e.result.breached);
   const level: 'info' | 'warn' = alerts.length > 0 ? 'warn' : 'info';
   const title = level === 'warn' ? '🚨 Codex 用量告警' : '📊 Codex 用量报告';
-  const header = `**Plan**：${snapshot.planType}`;
+  const header = `**Plan**：${snapshot.planType} ｜ **当前时间**：${formatLocalTime(options.nowMs)}`;
   const content = [header, '', ...lines].join('\n');
 
   const summaryLine =

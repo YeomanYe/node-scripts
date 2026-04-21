@@ -38,6 +38,12 @@ const WINDOWS: Record<ClaudeAlertWindow, WindowMeta> = {
   },
 };
 
+function formatLocalTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export interface ReportOptions {
   windows: ClaudeAlertWindow[];
   nowMs: number;
@@ -67,9 +73,10 @@ export function buildPollReport(usage: UsageData, options: ReportOptions): PollR
     const info = meta.get(usage);
     if (!info) continue;
 
+    const resetMs = new Date(info.resetsAt).getTime();
     const result = checkProrated({
       utilization: info.utilization,
-      resetsAtMs: new Date(info.resetsAt).getTime(),
+      resetsAtMs: resetMs,
       windowMs: meta.windowMs,
       nowMs: options.nowMs,
     });
@@ -80,8 +87,9 @@ export function buildPollReport(usage: UsageData, options: ReportOptions): PollR
     const diffLabel = result.breached
       ? `超 ${result.overBy.toFixed(1)}pp`
       : `差 ${result.overBy.toFixed(1)}pp`;
+    const resetLabel = Number.isFinite(resetMs) && resetMs > 0 ? ` ｜结束 ${formatLocalTime(resetMs)}` : '';
     lines.push(
-      `${prefix} ${meta.label}：${info.utilization.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}`
+      `${prefix} ${meta.label}：${info.utilization.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}${resetLabel}`
     );
   }
 
@@ -89,7 +97,7 @@ export function buildPollReport(usage: UsageData, options: ReportOptions): PollR
   const level: 'info' | 'warn' = alerts.length > 0 ? 'warn' : 'info';
   const title = level === 'warn' ? '🚨 Claude 用量告警' : '📊 Claude 用量报告';
 
-  const header = `**账号**：${options.subscription} ｜ **tier**：${options.tier}`;
+  const header = `**账号**：${options.subscription} ｜ **tier**：${options.tier} ｜ **当前时间**：${formatLocalTime(options.nowMs)}`;
   const content = [header, '', ...lines].join('\n');
 
   const summaryLine =

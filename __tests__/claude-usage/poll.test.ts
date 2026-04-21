@@ -75,6 +75,17 @@ describe('claude-usage buildPollReport', () => {
     });
     expect(report.level).toBe('info');
   });
+
+  test('content includes current time in header and reset time per window', () => {
+    const report = buildPollReport(makeUsage(), {
+      windows: ['five_hour', 'seven_day'],
+      nowMs: now,
+      subscription: 'pro',
+      tier: 'default',
+    });
+    expect(report.content).toMatch(/\*\*当前时间\*\*：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    expect(report.content.match(/结束 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/g)).toHaveLength(2);
+  });
 });
 
 describe('claude-usage runOnce', () => {
