@@ -11,7 +11,8 @@
     "claude-usage": "dist/claude-usage/index.js",
     "claude-task-runner": "dist/claude-task-runner/index.js",
     "codex-usage": "dist/codex-usage/index.js",
-    "codex-task-runner": "dist/codex-task-runner/index.js"
+    "codex-task-runner": "dist/codex-task-runner/index.js",
+    "git-pull-poll": "dist/git-pull-poll/index.js"
   },
   "scripts": {
     "build": "tsc",
