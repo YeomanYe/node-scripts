@@ -103,11 +103,19 @@ async function listRepos(root: string): Promise<string[]> {
   return repos.sort();
 }
 
-async function tick(root: string): Promise<void> {
+type Target = { mode: 'scan'; root: string } | { mode: 'single'; repo: string };
+
+async function tick(target: Target): Promise<void> {
   const started = Date.now();
   const now = new Date().toISOString();
-  const repos = await listRepos(root);
-  process.stdout.write(`[${now}] git-pull-poll: scanning ${repos.length} repos in ${root}\n`);
+  let repos: string[];
+  if (target.mode === 'single') {
+    repos = [target.repo];
+    process.stdout.write(`[${now}] git-pull-poll: single repo ${target.repo}\n`);
+  } else {
+    repos = await listRepos(target.root);
+    process.stdout.write(`[${now}] git-pull-poll: scanning ${repos.length} repos in ${target.root}\n`);
+  }
 
   let okCount = 0;
   let skipCount = 0;
@@ -152,18 +160,39 @@ function setupSignalHandlers(): void {
   process.on('SIGINT', cleanup);
 }
 
+function parseRepoArg(argv: string[]): string | undefined {
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--repo') return argv[i + 1];
+    if (a.startsWith('--repo=')) return a.slice('--repo='.length);
+  }
+  return undefined;
+}
+
 async function main(): Promise<void> {
-  const root = process.env.PROJECTS_ROOT || DEFAULT_ROOT;
+  const repoArg = parseRepoArg(process.argv) ?? process.env.REPO_PATH;
   const intervalSec = parseInt(process.env.POLL_INTERVAL_SEC ?? '', 10) || DEFAULT_INTERVAL_SEC;
 
+  let target: Target;
+  if (repoArg) {
+    const repo = path.resolve(repoArg);
+    if (!(await isGitRepo(repo))) {
+      throw new Error(`${repo} 不是 git 仓库`);
+    }
+    target = { mode: 'single', repo };
+  } else {
+    target = { mode: 'scan', root: process.env.PROJECTS_ROOT || DEFAULT_ROOT };
+  }
+
+  const startedLabel = target.mode === 'single' ? `repo=${target.repo}` : `root=${target.root}`;
   process.stdout.write(
-    `[${new Date().toISOString()}] git-pull-poll started (interval=${intervalSec}s, root=${root})\n`
+    `[${new Date().toISOString()}] git-pull-poll started (interval=${intervalSec}s, ${startedLabel})\n`
   );
 
   const wrapped = async (): Promise<void> => {
     if (signal.stopped) return;
     try {
-      await tick(root);
+      await tick(target);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[${new Date().toISOString()}] tick failed: ${msg}\n`);
