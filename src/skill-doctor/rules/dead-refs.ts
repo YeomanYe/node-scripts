@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Finding, Rule } from '../types';
+import { parseFrontmatter } from '../utils/frontmatter';
 
 const REF_PATTERN = /(?:`)?references\/([A-Za-z0-9_\-./]+)(?:`)?/g;
 
@@ -17,8 +18,9 @@ export const deadRefsRule: Rule = {
         continue;
       }
 
+      const { body } = parseFrontmatter(src);
       const seen = new Set<string>();
-      const lines = src.split(/\r?\n/);
+      const lines = body.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         REF_PATTERN.lastIndex = 0;
