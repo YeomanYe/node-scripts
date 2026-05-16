@@ -13,6 +13,7 @@
     "codex-usage": "dist/codex-usage/index.js",
     "codex-task-runner": "dist/codex-task-runner/index.js",
     "git-pull-poll": "dist/git-pull-poll/index.js",
+    "skill-doctor": "dist/skill-doctor/index.js",
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js"
   },
   "scripts": {
