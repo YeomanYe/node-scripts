@@ -29,7 +29,7 @@ export function buildMessage(report: RunReport): NotifierMessage {
   const errors = report.findings.filter((finding) => finding.level === 'error');
   const warnings = report.findings.filter((finding) => finding.level === 'warn');
   const level: 'warn' | 'info' = errors.length > 0 ? 'warn' : 'info';
-  const title = `🩺 skill-doctor - ${errors.length} errors / ${warnings.length} warnings`;
+  const title = `🩺 skill-doctor — ${errors.length} errors / ${warnings.length} warnings`;
   const parts = [
     `**Root**: ${report.root}`,
     `**Rules**: ${report.rulesRun.join(', ')}`,
