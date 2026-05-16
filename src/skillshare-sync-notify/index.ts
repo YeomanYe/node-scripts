@@ -26,6 +26,11 @@ export interface ChangedRepo {
   after: string;
 }
 
+interface AuditBlockedUpdate {
+  result: RunResult;
+  skills: string[];
+}
+
 export interface SkillshareSyncConfig {
   skillshareRoot: string;
   feishu?: FeishuChannelConfig;
@@ -76,6 +81,65 @@ function buildUpdateContent(changedRepos: ChangedRepo[]): string {
   return [`已执行 \`skillshare update --all\` 和 \`skillshare sync --all\`。`, '', ...lines].join('\n');
 }
 
+function isContinuableUpdateFailure(result: RunResult): boolean {
+  const output = `${result.stderr}\n${result.stdout}`;
+  return result.code !== 0 && /Update complete:/i.test(output) && /Blocked:/i.test(output);
+}
+
+function extractAuditBlockedSkills(result: RunResult): string[] {
+  const output = `${result.stderr}\n${result.stdout}`;
+  const skills = new Set<string>();
+  for (const line of output.split('\n')) {
+    const match = line.match(/✗\s+(.+?)\s+blocked by security audit/i);
+    if (match?.[1] && !/^\d+\s+repo\(s\)$/i.test(match[1])) {
+      skills.add(match[1]);
+    }
+  }
+  return Array.from(skills).sort((a, b) => a.localeCompare(b));
+}
+
+function formatAuditBlockedSkills(skills: string[]): string {
+  if (skills.length === 0) return '- 未能从输出中解析具体 skill 名称';
+  return skills.map((skill) => `- ${skill}`).join('\n');
+}
+
+function summarizeAuditWarning(result: RunResult): string {
+  const output = `${result.stderr}\n${result.stdout}`;
+  const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
+  const summary = lines.find((line) => line.includes('audit findings across'));
+  const highRisk = lines.find((line) => line.includes('skills with HIGH/CRITICAL findings'));
+  const blocked = lines.find((line) => line.includes('Blocked:'));
+  return [summary, highRisk, blocked].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function buildPartialUpdateContent(changedRepos: ChangedRepo[], auditBlocked: AuditBlockedUpdate): string {
+  const auditSummary = summarizeAuditWarning(auditBlocked.result);
+  return [
+    '同步结果：成功（有审计警告）。',
+    '',
+    buildUpdateContent(changedRepos),
+    '',
+    '第一遍 `skillshare update --all` 发现安全审计警告，已记录后用 `--skip-audit` 重试并完成同步。',
+    '',
+    '出现审计警告的 skill：',
+    formatAuditBlockedSkills(auditBlocked.skills),
+    ...(auditSummary ? ['', '审计摘要：', '```', auditSummary, '```'] : []),
+  ].join('\n');
+}
+
+function buildAuditBlockedContent(auditBlocked: AuditBlockedUpdate): string {
+  const auditSummary = summarizeAuditWarning(auditBlocked.result);
+  return [
+    '同步结果：成功（有审计警告）。',
+    '',
+    '第一遍 `skillshare update --all` 发现安全审计警告，已记录后用 `--skip-audit` 重试。',
+    '',
+    '出现审计警告的 skill：',
+    formatAuditBlockedSkills(auditBlocked.skills),
+    ...(auditSummary ? ['', '审计摘要：', '```', auditSummary, '```'] : []),
+  ].join('\n');
+}
+
 function buildFailureContent(step: string, result: RunResult): string {
   return [`步骤失败: \`${step}\``, '', '```', compactOutput(result), '```'].join('\n');
 }
@@ -121,7 +185,30 @@ export async function runSkillshareSyncNotify(
     const update = await deps.runCommand('skillshare', ['update', '--all'], config.skillshareRoot);
     await restoreMetadataFile(preservedMetadata);
     await normalizeSkillsGitignore(config.skillshareRoot);
-    if (update.code !== 0) {
+    let auditBlocked: AuditBlockedUpdate | undefined;
+    if (isContinuableUpdateFailure(update)) {
+      auditBlocked = {
+        result: update,
+        skills: extractAuditBlockedSkills(update),
+      };
+      const retry = await deps.runCommand('skillshare', ['update', '--all', '--skip-audit'], config.skillshareRoot);
+      await restoreMetadataFile(preservedMetadata);
+      await normalizeSkillsGitignore(config.skillshareRoot);
+      if (retry.code !== 0) {
+        const reason = compactOutput(retry);
+        await maybeNotify(config, deps, {
+          title: 'Skillshare 同步失败',
+          content: [
+            buildFailureContent('skillshare update --all --skip-audit', retry),
+            '',
+            '第一遍审计阻塞的 skill：',
+            formatAuditBlockedSkills(auditBlocked.skills),
+          ].join('\n'),
+          level: 'warn',
+        });
+        return { status: 'failed', reason };
+      }
+    } else if (update.code !== 0) {
       const reason = compactOutput(update);
       await maybeNotify(config, deps, {
         title: 'Skillshare 同步失败',
@@ -134,6 +221,13 @@ export async function runSkillshareSyncNotify(
     const after = await deps.getSnapshot(config.skillshareRoot);
     const changedRepos = detectChangedRepos(before, after);
     if (changedRepos.length === 0) {
+      if (auditBlocked) {
+        await maybeNotify(config, deps, {
+          title: 'Skillshare 同步成功（有审计警告）',
+          content: buildAuditBlockedContent(auditBlocked),
+          level: 'warn',
+        });
+      }
       deps.log(`[${new Date().toISOString()}] skillshare-sync-notify: no updates`);
       return { status: 'unchanged' };
     }
@@ -152,11 +246,14 @@ export async function runSkillshareSyncNotify(
     }
 
     await maybeNotify(config, deps, {
-      title: 'Skillshare 有更新',
-      content: buildUpdateContent(changedRepos),
-      level: 'info',
+      title: auditBlocked ? 'Skillshare 同步成功（有审计警告）' : 'Skillshare 有更新',
+      content: auditBlocked ? buildPartialUpdateContent(changedRepos, auditBlocked) : buildUpdateContent(changedRepos),
+      level: auditBlocked ? 'warn' : 'info',
     });
-    deps.log(`[${new Date().toISOString()}] skillshare-sync-notify: synced ${changedRepos.length} updated repos`);
+    deps.log(
+      `[${new Date().toISOString()}] skillshare-sync-notify: synced ${changedRepos.length} updated repos`
+      + (auditBlocked ? ' after skip-audit retry' : '')
+    );
     return { status: 'updated', changedRepos };
   } finally {
     await restoreMetadataFile(preservedMetadata);

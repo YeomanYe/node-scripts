@@ -338,6 +338,45 @@ describe('skillshare-sync-notify', () => {
     }));
   });
 
+  test('retries with skip-audit when update completed with audit-blocked repositories', async () => {
+    const deps = createDeps({
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'aaa']]))
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'bbb']])),
+      runCommand: jest
+        .fn()
+        .mockResolvedValueOnce({
+          code: 1,
+          stdout: [
+            '✗ _agent-browser-official blocked by security audit (CRITICAL)',
+            '✗ _skillshare-official blocked by security audit (CRITICAL)',
+            'Update complete: 9 updated, 8 skipped, 0 pruned (71.2s)',
+            '! Blocked: 2 repo(s) by security audit',
+            "- Next Steps\n→ Run 'skillshare sync' to distribute changes",
+          ].join('\n'),
+          stderr: '✗ 2 repo(s) blocked by security audit',
+        })
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }),
+    });
+
+    const result = await runSkillshareSyncNotify({
+      skillshareRoot: '/tmp/skillshare',
+      feishu: { type: 'feishu', app_id: 'cli_test', app_secret: 'secret', receive_id: 'chat' },
+    }, deps);
+
+    expect(result.status).toBe('updated');
+    expect(deps.runCommand).toHaveBeenNthCalledWith(1, 'skillshare', ['update', '--all'], '/tmp/skillshare');
+    expect(deps.runCommand).toHaveBeenNthCalledWith(2, 'skillshare', ['update', '--all', '--skip-audit'], '/tmp/skillshare');
+    expect(deps.runCommand).toHaveBeenNthCalledWith(3, 'skillshare', ['sync', '--all'], '/tmp/skillshare');
+    expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Skillshare 同步成功（有审计警告）',
+      level: 'warn',
+      content: expect.stringContaining('_agent-browser-official'),
+    }));
+  });
+
   test('reads Feishu channel from YAML config when env points to a config file', () => {
     const readFile = jest.fn(() => [
       'channels:',
