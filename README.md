@@ -13,6 +13,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
 | [codex-task-runner](#codex-task-runner) | Codex 自动化任务调度 |
+| [skill-doctor](#skill-doctor) | Claude skills 仓库体检（lint） |
 
 ## 安装
 
@@ -385,6 +386,62 @@ defaults:
 ```
 
 详细文档：[docs/claude-task-runner.md](docs/claude-task-runner.md)
+
+---
+
+## Skill-Doctor
+
+对 Claude skills 仓库做静态体检，跨平台纯 Node 实现，无需 shell 依赖。
+
+### 内置规则
+
+- **dead-refs**：扫 `SKILL.md` 中 `references/X` 引用是否实际存在
+- **frontmatter**：校验 `name` / `description` 等 frontmatter 字段
+- **bsd-compat**：扫 `.sh` 中 `\s` / `\d` / `grep -P` 等 BSD 不兼容写法
+- **shared-drift**：对比 `_shared/X.md` 与各 skill 的 `references/X.md` sha256
+
+### 使用方式
+
+```bash
+# 默认扫 ~/Documents/projects/skills，文本输出，on-error 推飞书
+node dist/skill-doctor/index.js
+
+# 指定根目录
+node dist/skill-doctor/index.js --root ~/path/to/skills
+
+# JSON 输出，给 CI 用
+node dist/skill-doctor/index.js --format json --notify off
+
+# 只跑指定规则
+node dist/skill-doctor/index.js --rules dead-refs,frontmatter
+
+# 关闭通知
+node dist/skill-doctor/index.js --notify off
+```
+
+### 退出码
+
+- `0` — 干净
+- `1` — 仅 warning
+- `2` — 出现 error 或参数错误
+
+### 飞书通知
+
+按优先级读取配置：`--feishu-config <path>` > `SKILL_DOCTOR_FEISHU_CONFIG` env > `~/.config/skill-doctor/feishu.json`。
+
+配置文件格式：
+
+```json
+{
+  "type": "feishu",
+  "app_id": "cli_xxx",
+  "app_secret": "xxx",
+  "receive_id": "oc_xxx",
+  "receive_id_type": "chat_id"
+}
+```
+
+`--notify` 三种模式：`on-error`（默认，仅当有 error 推送）/ `always` / `off`。
 
 ---
 
