@@ -1,12 +1,25 @@
 import * as path from 'path';
 import { bsdCompatRule } from './rules/bsd-compat';
 import { deadRefsRule } from './rules/dead-refs';
+import { directorMetaSpecRule } from './rules/director-meta-spec';
+import { fileSizeRule } from './rules/file-size';
 import { frontmatterRule } from './rules/frontmatter';
+import { readmeIndexRule } from './rules/readme-index';
+import { routerCoverageRule } from './rules/router-coverage';
 import { sharedDriftRule } from './rules/shared-drift';
 import type { Finding, Rule, RunReport, SkillEntry } from './types';
 import { findSkillMds } from './utils/walk';
 
-const ALL_RULES: Rule[] = [deadRefsRule, frontmatterRule, bsdCompatRule, sharedDriftRule];
+const ALL_RULES: Rule[] = [
+  deadRefsRule,
+  frontmatterRule,
+  bsdCompatRule,
+  sharedDriftRule,
+  readmeIndexRule,
+  directorMetaSpecRule,
+  routerCoverageRule,
+  fileSizeRule,
+];
 
 export interface RunOptions {
   root: string;
