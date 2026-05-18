@@ -395,10 +395,17 @@ defaults:
 
 ### 内置规则
 
-- **dead-refs**：扫 `SKILL.md` 中 `references/X` 引用是否实际存在
-- **frontmatter**：校验 `name` / `description` 等 frontmatter 字段
-- **bsd-compat**：扫 `.sh` 中 `\s` / `\d` / `grep -P` 等 BSD 不兼容写法
-- **shared-drift**：对比 `_shared/X.md` 与各 skill 的 `references/X.md` sha256
+**Batch 1**（基础）:
+- **dead-refs**（error）：扫 `SKILL.md` 中 `references/X` 引用是否实际存在
+- **frontmatter**（warn）：校验 `name` / `description` 等 frontmatter 字段
+- **bsd-compat**（warn）：扫 `.sh` 中 `\s` / `\d` / `grep -P` 等 BSD 不兼容写法
+- **shared-drift**（warn）：对比 `_shared/X.md` 与各 skill 的 `references/X.md` sha256
+
+**Batch 2**（增强）:
+- **readme-index**（error）：扫 `*.md` 中 markdown 链接 `[text](./dir/)` 指向是否存在
+- **director-meta-spec**（error）：`director-*` SKILL.md 必须含元规范 9 段（Step 0 Q Gate / N 维 Audit / Aggregate→Verdict / Subagent template / Parallelization Plan / Codex Hook 等）
+- **router-coverage**（warn）：`flow-codex-goal/references/role-router.md` 必须列出所有实际存在的 `director-*`（避免新加角色漏推路由）
+- **file-size**（warn）：SKILL.md > 500 行 warn（信息过载，建议拆 references）
 
 ### 使用方式
 
