@@ -32,6 +32,7 @@ export interface FixerContext {
 }
 
 export interface FixAction {
+  fixer?: string;
   file: string;
   description: string;
   before?: string;
@@ -57,4 +58,9 @@ export interface RunReport {
   rulesRun: string[];
   findings: Finding[];
   counts: { error: number; warn: number; info: number };
+  fix_mode?: 'dry-run' | 'apply';
+  fixers_ran?: string[];
+  fixes_pending?: FixAction[];
+  fixes_applied?: FixAction[];
+  fix_errors?: string[];
 }

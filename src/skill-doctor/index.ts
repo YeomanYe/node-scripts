@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { execFile } from 'child_process';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import { promisify } from 'util';
 import { loadFeishuConfig } from './config';
+import { runFixers } from './fix/runner';
 import { maybeSendFeishu, type NotifyMode } from './notify/feishu';
 import { renderJson } from './reporters/json';
 import { renderText } from './reporters/text';
@@ -17,6 +20,8 @@ export interface CliResult {
 
 type OutputFormat = 'text' | 'json';
 
+const execFileAsync = promisify(execFile);
+
 interface CliOptions {
   root: string;
   rules?: string;
@@ -24,6 +29,9 @@ interface CliOptions {
   notify: string;
   feishuConfig?: string;
   color: boolean;
+  fix?: boolean;
+  apply?: boolean;
+  dryRun?: boolean;
 }
 
 function parseRules(rules: string | undefined): string[] | undefined {
@@ -45,6 +53,13 @@ async function ensureRootExists(root: string): Promise<void> {
   }
 }
 
+async function ensureCleanWorkingTree(): Promise<void> {
+  const { stdout } = await execFileAsync('git', ['status', '--short']);
+  if (stdout.trim().length > 0) {
+    throw new Error('Working tree not clean; commit or stash first');
+  }
+}
+
 export async function runMain(argv: string[]): Promise<CliResult> {
   const program = new Command();
   program
@@ -55,6 +70,9 @@ export async function runMain(argv: string[]): Promise<CliResult> {
     .option('--format <fmt>', 'output format: text|json', 'text')
     .option('--notify <mode>', 'feishu notify: on-error|always|off', 'on-error')
     .option('--feishu-config <path>', 'feishu config json path')
+    .option('--fix', 'run deterministic fixers instead of rules')
+    .option('--apply', 'apply fixes; requires --fix')
+    .option('--dry-run', 'preview fixes without changing files')
     .option('--no-color', 'disable color in text output')
     .allowExcessArguments(false)
     .exitOverride();
@@ -73,6 +91,13 @@ export async function runMain(argv: string[]): Promise<CliResult> {
   if (!isNotifyMode(opts.notify)) {
     return { code: 2, output: `invalid --notify: ${opts.notify}` };
   }
+  if (opts.apply && !opts.fix) {
+    return { code: 2, output: '--apply requires --fix' };
+  }
+  const notifySource = parsed.getOptionValueSource('notify');
+  if (opts.fix && notifySource === 'cli' && opts.notify !== 'off') {
+    return { code: 2, output: '--fix cannot be combined with --notify' };
+  }
 
   try {
     await ensureRootExists(opts.root);
@@ -80,12 +105,22 @@ export async function runMain(argv: string[]): Promise<CliResult> {
     return { code: 2, output: err instanceof Error ? err.message : String(err) };
   }
 
-  const report = await runDoctor({ root: opts.root, ruleIds: parseRules(opts.rules) });
+  if (opts.fix && opts.apply) {
+    try {
+      await ensureCleanWorkingTree();
+    } catch (err) {
+      return { code: 2, output: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  const report = opts.fix
+    ? await runFixers({ root: opts.root, ruleIds: parseRules(opts.rules), dryRun: !opts.apply })
+    : await runDoctor({ root: opts.root, ruleIds: parseRules(opts.rules) });
   const output = opts.format === 'json'
     ? renderJson(report)
     : renderText(report, { color: opts.color !== false });
 
-  if (opts.notify !== 'off') {
+  if (!opts.fix && opts.notify !== 'off') {
     try {
       const config = await loadFeishuConfig(opts.feishuConfig);
       if (config) {
@@ -96,7 +131,9 @@ export async function runMain(argv: string[]): Promise<CliResult> {
     }
   }
 
-  const code = report.counts.error > 0 ? 2 : report.counts.warn > 0 ? 1 : 0;
+  const code = report.fix_errors && report.fix_errors.length > 0
+    ? 2
+    : report.counts.error > 0 ? 2 : report.counts.warn > 0 ? 1 : 0;
   return { code, output };
 }
 
