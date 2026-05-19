@@ -426,6 +426,27 @@ node dist/skill-doctor/index.js --rules dead-refs,frontmatter
 node dist/skill-doctor/index.js --notify off
 ```
 
+### 自动修复
+
+`--fix` 模式只运行确定性的修复器，不运行 lint 规则，也不会发送通知。默认是 dry-run，只打印将要执行的动作，不改文件。
+
+```bash
+# 预览全部修复动作
+node dist/skill-doctor/index.js --fix --dry-run --notify off
+
+# 只预览某个修复器
+node dist/skill-doctor/index.js --rules bsd-compat --fix --dry-run --notify off
+
+# 真实写入修复；要求 git 工作区干净
+node dist/skill-doctor/index.js --fix --apply --notify off
+```
+
+内置修复器：
+- **bsd-compat**：在 `.sh` / `.bash` 非注释行中把 `\s` 改成 `[[:space:]]`、`\d` 改成 `[0-9]`；不自动改 `grep -P`
+- **shared-drift**：包装执行 `<root>/scripts/sync-shared.sh`
+
+`--apply` 必须和 `--fix` 一起使用。真实写入前会检查 `git status --short`，工作区不干净时拒绝执行并返回 `2`。
+
 ### 退出码
 
 - `0` — 干净
