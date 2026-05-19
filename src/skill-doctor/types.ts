@@ -26,6 +26,30 @@ export interface Rule {
   run: (ctx: RuleContext) => Promise<Finding[]>;
 }
 
+export interface FixerContext {
+  root: string;
+  skills: SkillEntry[];
+}
+
+export interface FixAction {
+  file: string;
+  description: string;
+  before?: string;
+  after?: string;
+}
+
+export interface FixResult {
+  fixer: string;
+  actions: FixAction[];
+  errors: string[];
+}
+
+export interface Fixer {
+  id: string;
+  description: string;
+  fix: (ctx: FixerContext, dryRun: boolean) => Promise<FixResult>;
+}
+
 export interface RunReport {
   root: string;
   startedAt: string;
