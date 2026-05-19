@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { runMain } from '../../src/skill-doctor/index';
 
@@ -31,5 +32,31 @@ describe('cli runMain', () => {
       '--notify', 'off',
     ]);
     expect(code).toBe(1);
+  });
+
+  it('rejects --apply without --fix', async () => {
+    const { code, output } = await runMain([
+      '--root', path.join(FIXTURES, 'clean'),
+      '--apply',
+    ]);
+    expect(code).toBe(2);
+    expect(output).toContain('--apply requires --fix');
+  });
+
+  it('refuses apply mode when the working tree is dirty', async () => {
+    const dirtyPath = path.join(process.cwd(), '.skill-doctor-dirty-test');
+    await fs.writeFile(dirtyPath, 'dirty\n');
+    try {
+      const { code, output } = await runMain([
+        '--root', path.join(FIXTURES, 'clean'),
+        '--fix',
+        '--apply',
+        '--notify', 'off',
+      ]);
+      expect(code).toBe(2);
+      expect(output).toContain('Working tree not clean; commit or stash first');
+    } finally {
+      await fs.rm(dirtyPath, { force: true });
+    }
   });
 });

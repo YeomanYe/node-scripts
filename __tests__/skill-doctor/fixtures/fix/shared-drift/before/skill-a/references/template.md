@@ -1,0 +1,3 @@
+# Shared Template
+
+Stale content.
