@@ -10,8 +10,10 @@
     "exec-recursive": "dist/exec-recursive/index.js",
     "claude-usage": "dist/claude-usage/index.js",
     "claude-task-runner": "dist/claude-task-runner/index.js",
+    "claude-task-loop": "dist/claude-task-loop/index.js",
     "codex-usage": "dist/codex-usage/index.js",
     "codex-task-runner": "dist/codex-task-runner/index.js",
+    "codex-task-loop": "dist/codex-task-loop/index.js",
     "git-pull-poll": "dist/git-pull-poll/index.js",
     "skill-doctor": "dist/skill-doctor/index.js",
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js"

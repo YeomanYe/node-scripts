@@ -48,6 +48,22 @@ export function summarizeTaskOutput(finalMessage: string, stderr: string): strin
   return truncate(summary, 200);
 }
 
+/**
+ * 从 codex stderr 提取真正的错误信息。
+ * codex 会先打启动 banner 再打错误，所以单纯截头会拿到 banner；
+ * 这里优先抓 ERROR: 行（最后一条），找不到再回退到 stderr 尾部。
+ */
+export function extractCodexError(stderr: string): string {
+  const lines = stderr.split('\n').map(l => l.trim()).filter(Boolean);
+  const errorLines = lines.filter(l => /^ERROR[:\s]/i.test(l) || l.includes('"error"'));
+  if (errorLines.length > 0) {
+    return truncate(errorLines[errorLines.length - 1], 400);
+  }
+  const trimmed = stderr.trim();
+  if (trimmed.length <= 400) return trimmed || '(无输出)';
+  return '...' + trimmed.slice(-400);
+}
+
 function extractCost(stdout: string): number {
   const lines = stdout.split('\n').map(line => line.trim()).filter(Boolean);
 
@@ -169,10 +185,10 @@ export async function executeTask(
       const durationSec = Math.round((Date.now() - startTime) / 1000);
       const exitCode = code ?? -1;
       const finalMessage = await fs.readFile(outputFile, 'utf-8').catch(() => '');
-      const summary = summarizeTaskOutput(finalMessage, stderr);
       const costUsd = extractCost(stdout);
 
       if (exitCode === 0) {
+        const summary = summarizeTaskOutput(finalMessage, stderr);
         log(`[任务 #${index}] 完成: ${task.name} (${durationSec}s, $${costUsd.toFixed(4)})`);
         await cleanupAndResolve({
           index,
@@ -187,6 +203,7 @@ export async function executeTask(
         return;
       }
 
+      const summary = extractCodexError(stderr);
       logError(`[任务 #${index}] 失败: ${task.name} - ${summary}`);
       await cleanupAndResolve({
         index,
