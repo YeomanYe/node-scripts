@@ -95,6 +95,8 @@ export interface TaskResult {
   exitCode: number;
   /** 结果摘要 */
   summary: string;
+  /** 完整模型输出，用于上游解析结构化报告 */
+  output?: string;
 }
 
 /** CLI 命令选项 */

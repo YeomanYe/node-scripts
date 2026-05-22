@@ -2,19 +2,24 @@
 
 import { Command } from 'commander';
 import * as fs from 'fs';
+import * as path from 'path';
 import { executeTask } from '../claude-task-runner/executor';
 import { DefaultsConfig, PermissionMode, TaskConfig } from '../claude-task-runner/types';
-import { sendFeishuCard } from '../shared/notifiers/feishu';
+import { sendFeishuCard, sendFeishuFile, sendFeishuImage, sendFeishuText } from '../shared/notifiers/feishu';
 import { FeishuChannelConfig } from '../shared/notifiers/types';
+import { buildTodoDriverNotification } from '../shared/todo-driver-report';
 
 interface MinimalTask {
   name?: string;
   prompt: string;
+  prompt_file?: string;
   workdir?: string;
   model?: string;
   max_budget?: number;
   permission_mode?: PermissionMode;
 }
+
+const FEISHU_ATTACHMENT_SEND_DELAY_MS = 1200;
 
 interface LoopDefaults {
   workdir?: string;
@@ -44,7 +49,26 @@ function parsePermissionMode(raw: unknown, where: string): PermissionMode | unde
   return raw as PermissionMode;
 }
 
-function validateTasks(raw: unknown): MinimalTask[] {
+function resolvePrompt(t: Record<string, unknown>, idx: number, configDir: string): Pick<MinimalTask, 'prompt' | 'prompt_file'> {
+  if (typeof t.prompt === 'string' && t.prompt) {
+    return {
+      prompt: t.prompt,
+      prompt_file: typeof t.prompt_file === 'string' ? t.prompt_file : undefined,
+    };
+  }
+  if (typeof t.prompt_file !== 'string' || !t.prompt_file) {
+    throw new Error(`task #${idx} missing required field "prompt" or "prompt_file"`);
+  }
+  const promptPath = path.isAbsolute(t.prompt_file)
+    ? t.prompt_file
+    : path.join(configDir, t.prompt_file);
+  return {
+    prompt: fs.readFileSync(promptPath, 'utf-8'),
+    prompt_file: t.prompt_file,
+  };
+}
+
+function validateTasks(raw: unknown, configDir: string): MinimalTask[] {
   if (!Array.isArray(raw)) {
     throw new Error('"tasks" must be an array');
   }
@@ -53,12 +77,10 @@ function validateTasks(raw: unknown): MinimalTask[] {
       throw new Error(`task #${idx} must be an object`);
     }
     const t = item as Record<string, unknown>;
-    if (typeof t.prompt !== 'string' || !t.prompt) {
-      throw new Error(`task #${idx} missing required field "prompt"`);
-    }
+    const prompt = resolvePrompt(t, idx, configDir);
     return {
       name: typeof t.name === 'string' ? t.name : undefined,
-      prompt: t.prompt,
+      ...prompt,
       workdir: typeof t.workdir === 'string' ? t.workdir : undefined,
       model: typeof t.model === 'string' ? t.model : undefined,
       max_budget: typeof t.max_budget === 'number' ? t.max_budget : undefined,
@@ -100,16 +122,17 @@ function validateFeishu(raw: unknown): FeishuChannelConfig | undefined {
   };
 }
 
-function loadConfig(configPath: string): LoopConfig {
+export function loadConfig(configPath: string): LoopConfig {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const parsed: unknown = JSON.parse(raw);
+  const configDir = path.dirname(path.resolve(configPath));
   if (Array.isArray(parsed)) {
-    return { tasks: validateTasks(parsed) };
+    return { tasks: validateTasks(parsed, configDir) };
   }
   if (typeof parsed === 'object' && parsed !== null) {
     const obj = parsed as Record<string, unknown>;
     return {
-      tasks: validateTasks(obj.tasks),
+      tasks: validateTasks(obj.tasks, configDir),
       defaults: validateDefaults(obj.defaults),
       feishu: validateFeishu(obj.feishu),
     };
@@ -147,6 +170,46 @@ async function safeNotify(
   }
 }
 
+async function safeNotifyTaskResult(
+  feishu: FeishuChannelConfig | undefined,
+  taskName: string,
+  result: Awaited<ReturnType<typeof executeTask>>,
+  iter: number,
+  totalCount: number
+): Promise<void> {
+  if (!feishu) return;
+  const message = buildTodoDriverNotification(taskName, result, iter, totalCount);
+  await safeNotify(feishu, message.title, message.content, message.level);
+  for (let i = 0; i < message.attachments.length; i++) {
+    const attachment = message.attachments[i];
+    if (i > 0 || attachment.caption) {
+      await sleep(FEISHU_ATTACHMENT_SEND_DELAY_MS);
+    }
+    if (attachment.caption) {
+      await sendFeishuText(
+        feishu,
+        [
+          `stage: ${message.stage ?? '-'}`,
+          `slug: ${message.slug ?? '-'}`,
+          `caption: ${attachment.caption}`,
+          `${attachment.type}: ${attachment.path}`,
+        ].join('\n')
+      );
+      await sleep(FEISHU_ATTACHMENT_SEND_DELAY_MS);
+    }
+    try {
+      if (attachment.type === 'image') {
+        await sendFeishuImage(feishu, attachment.path);
+      } else {
+        await sendFeishuFile(feishu, attachment.path);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[loop] feishu ${attachment.type} notify failed (${attachment.path}): ${msg}\n`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const program = new Command();
   program
@@ -155,6 +218,7 @@ async function main(): Promise<void> {
     .argument(
       '<config>',
       'JSON config: array of tasks, or {tasks, defaults?, feishu?}. ' +
+        'tasks support prompt or prompt_file. ' +
         'defaults supports: workdir, model, max_budget, timeout_minutes, permission_mode'
     )
     .option('-n, --count <n>', 'Iterations of the whole sequence (0 = infinite)', '0')
@@ -260,22 +324,7 @@ async function main(): Promise<void> {
 
       const shouldNotify = !succeeded || notifySuccessTasks;
       if (shouldNotify) {
-        await safeNotify(
-          feishu,
-          `${succeeded ? '任务完成' : '任务失败'}: ${taskConfig.name}`,
-          [
-            `- 迭代: ${iter}${totalCount > 0 ? `/${totalCount}` : ''}`,
-            `- 状态: ${result.status}`,
-            `- 耗时: ${result.durationSec}s`,
-            `- 费用: $${result.costUsd.toFixed(4)}`,
-            '',
-            `结果:`,
-            '```',
-            result.summary,
-            '```',
-          ].join('\n'),
-          succeeded ? 'info' : 'warn'
-        );
+        await safeNotifyTaskResult(feishu, taskConfig.name, result, iter, totalCount);
       }
 
       if (!succeeded) {

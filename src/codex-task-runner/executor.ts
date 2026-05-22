@@ -85,7 +85,10 @@ export async function executeTask(
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-task-runner-'));
   const outputFile = path.join(tempDir, 'last-message.txt');
   const args = buildArgs(task, defaults, outputFile);
-  const timeoutMs = defaults.timeout_minutes * 60 * 1000;
+  const timeoutMs =
+    typeof defaults.timeout_minutes === 'number' && defaults.timeout_minutes > 0
+      ? defaults.timeout_minutes * 60 * 1000
+      : null;
   const startTime = Date.now();
 
   log(`[任务 #${index}] 开始执行: ${task.name}`);
@@ -111,7 +114,7 @@ export async function executeTask(
       resolve(result);
     };
 
-    const timer = setTimeout(() => {
+    const timer = timeoutMs === null ? undefined : setTimeout(() => {
       if (!settled) {
         settled = true;
         child.kill('SIGTERM');
@@ -159,7 +162,7 @@ export async function executeTask(
     child.on('error', (error: Error) => {
       if (!settled) {
         settled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         const durationSec = Math.round((Date.now() - startTime) / 1000);
         logError(`[任务 #${index}] 进程错误: ${error.message}`);
 
@@ -180,7 +183,7 @@ export async function executeTask(
       if (settled) return;
 
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
 
       const durationSec = Math.round((Date.now() - startTime) / 1000);
       const exitCode = code ?? -1;
@@ -199,6 +202,7 @@ export async function executeTask(
           costUsd,
           exitCode,
           summary,
+          output: finalMessage,
         });
         return;
       }
@@ -214,6 +218,7 @@ export async function executeTask(
         costUsd,
         exitCode,
         summary,
+        output: finalMessage.trim() || stderr,
       });
     });
   });

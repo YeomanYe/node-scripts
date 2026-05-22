@@ -1,62 +1,10 @@
+import { spawn } from 'child_process';
+import * as path from 'path';
 import { FeishuChannelConfig, Notifier, NotifierMessage } from './types';
-
-interface TenantTokenResponse {
-  code: number;
-  msg: string;
-  tenant_access_token: string;
-  expire: number;
-}
-
-interface CachedToken {
-  token: string;
-  expiresAt: number;
-}
-
-/** key = `${app_id}|${domain}` */
-const tokenCache = new Map<string, CachedToken>();
 
 /** 仅用于测试 */
 export function _resetFeishuTokenCache(): void {
-  tokenCache.clear();
-}
-
-function resolveDomain(config: FeishuChannelConfig): string {
-  return config.domain ?? 'https://open.feishu.cn';
-}
-
-function resolveReceiveIdType(config: FeishuChannelConfig): string {
-  return config.receive_id_type ?? 'chat_id';
-}
-
-async function getTenantToken(config: FeishuChannelConfig): Promise<string> {
-  const domain = resolveDomain(config);
-  const key = `${config.app_id}|${domain}`;
-  const cached = tokenCache.get(key);
-  if (cached && cached.expiresAt > Date.now() + 60_000) {
-    return cached.token;
-  }
-
-  const response = await fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ app_id: config.app_id, app_secret: config.app_secret }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取 tenant_access_token 失败: HTTP ${response.status}`);
-  }
-
-  const data = (await response.json()) as TenantTokenResponse;
-  if (data.code !== 0) {
-    throw new Error(`获取 tenant_access_token 失败: ${data.msg}`);
-  }
-
-  tokenCache.set(key, {
-    token: data.tenant_access_token,
-    expiresAt: Date.now() + data.expire * 1000,
-  });
-
-  return data.tenant_access_token;
+  // Kept for compatibility with older tests/imports. lark-cli owns auth state now.
 }
 
 function buildCardMessage(title: string, content: string, level: 'info' | 'warn'): string {
@@ -70,8 +18,203 @@ function buildCardMessage(title: string, content: string, level: 'info' | 'warn'
   });
 }
 
+function buildLarkCliArgs(config: FeishuChannelConfig, cardContent: string): string[] {
+  const receiveIdType = config.receive_id_type ?? 'chat_id';
+  if (receiveIdType === 'chat_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--chat-id',
+      config.receive_id,
+      '--msg-type',
+      'interactive',
+      '--content',
+      cardContent,
+    ];
+  }
+
+  if (receiveIdType === 'open_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--user-id',
+      config.receive_id,
+      '--msg-type',
+      'interactive',
+      '--content',
+      cardContent,
+    ];
+  }
+
+  return [
+    '--profile',
+    config.app_id,
+    'api',
+    'POST',
+    '/open-apis/im/v1/messages',
+    '--params',
+    JSON.stringify({ receive_id_type: receiveIdType }),
+    '--data',
+    JSON.stringify({
+      receive_id: config.receive_id,
+      msg_type: 'interactive',
+      content: cardContent,
+    }),
+  ];
+}
+
+function buildLarkCliTextArgs(config: FeishuChannelConfig, text: string): string[] {
+  const receiveIdType = config.receive_id_type ?? 'chat_id';
+  if (receiveIdType === 'chat_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--chat-id',
+      config.receive_id,
+      '--text',
+      text,
+    ];
+  }
+
+  if (receiveIdType === 'open_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--user-id',
+      config.receive_id,
+      '--text',
+      text,
+    ];
+  }
+
+  return [
+    '--profile',
+    config.app_id,
+    'api',
+    'POST',
+    '/open-apis/im/v1/messages',
+    '--params',
+    JSON.stringify({ receive_id_type: receiveIdType }),
+    '--data',
+    JSON.stringify({
+      receive_id: config.receive_id,
+      msg_type: 'text',
+      content: JSON.stringify({ text }),
+    }),
+  ];
+}
+
+function buildLarkCliAttachmentArgs(
+  config: FeishuChannelConfig,
+  flag: '--image' | '--file',
+  filePath: string
+): string[] {
+  const receiveIdType = config.receive_id_type ?? 'chat_id';
+  if (receiveIdType === 'chat_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--chat-id',
+      config.receive_id,
+      flag,
+      filePath,
+    ];
+  }
+
+  if (receiveIdType === 'open_id') {
+    return [
+      '--profile',
+      config.app_id,
+      'im',
+      '+messages-send',
+      '--as',
+      'bot',
+      '--user-id',
+      config.receive_id,
+      flag,
+      filePath,
+    ];
+  }
+
+  throw new Error(`lark-cli attachment send does not support receive_id_type=${receiveIdType}`);
+}
+
+function runLarkCli(
+  args: string[],
+  input?: string,
+  allowAlreadyExists = false,
+  cwd?: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('lark-cli', args, {
+      cwd,
+      stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+
+    if (input !== undefined) {
+      proc.stdin?.end(input);
+    }
+    proc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', (error) => {
+      reject(new Error(`lark-cli 启动失败: ${error.message}`));
+    });
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      if (allowAlreadyExists && /already exists/i.test(stderr)) {
+        resolve();
+        return;
+      }
+      reject(new Error(`lark-cli 发送失败 (${code ?? 'unknown'}): ${stderr.trim() || 'unknown error'}`));
+    });
+  });
+}
+
+async function ensureLarkCliProfile(config: FeishuChannelConfig): Promise<void> {
+  await runLarkCli(
+    [
+      'profile',
+      'add',
+      '--name',
+      config.app_id,
+      '--app-id',
+      config.app_id,
+      '--app-secret-stdin',
+      '--brand',
+      'feishu',
+    ],
+    config.app_secret,
+    true
+  );
+}
+
 /**
- * 发送飞书交互卡片（保持与旧 claude-task-runner 签名兼容）。
+ * 通过 lark-cli 发送飞书交互卡片（保持与旧 claude-task-runner 签名兼容）。
  * 若 app_id / app_secret / receive_id 任一为空则静默跳过。
  */
 export async function sendFeishuCard(
@@ -84,32 +227,57 @@ export async function sendFeishuCard(
     return;
   }
 
-  const token = await getTenantToken(config);
-  const domain = resolveDomain(config);
-  const url = `${domain}/open-apis/im/v1/messages?receive_id_type=${resolveReceiveIdType(config)}`;
+  await ensureLarkCliProfile(config);
+  await runLarkCli(buildLarkCliArgs(config, buildCardMessage(title, content, level)));
+}
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      receive_id: config.receive_id,
-      msg_type: 'interactive',
-      content: buildCardMessage(title, content, level),
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`飞书消息发送失败 HTTP ${response.status}: ${text}`);
+/**
+ * 通过 lark-cli 发送普通文本消息，适合附件 caption 这类纯文字说明。
+ */
+export async function sendFeishuText(
+  config: FeishuChannelConfig,
+  text: string
+): Promise<void> {
+  if (!config.app_id || !config.app_secret || !config.receive_id || !text) {
+    return;
   }
 
-  const result = (await response.json()) as { code?: number; msg?: string };
-  if (result.code !== 0) {
-    throw new Error(`飞书消息发送失败: ${result.msg ?? '未知错误'}`);
+  await ensureLarkCliProfile(config);
+  await runLarkCli(buildLarkCliTextArgs(config, text));
+}
+
+/**
+ * 通过 lark-cli 发送本地图片。调用方负责控制图片数量，避免触发消息频率/大小上限。
+ */
+export async function sendFeishuImage(
+  config: FeishuChannelConfig,
+  imagePath: string
+): Promise<void> {
+  if (!config.app_id || !config.app_secret || !config.receive_id || !imagePath) {
+    return;
   }
+
+  const cwd = path.isAbsolute(imagePath) ? path.dirname(imagePath) : undefined;
+  const relativeImagePath = path.isAbsolute(imagePath) ? `.${path.sep}${path.basename(imagePath)}` : imagePath;
+  await ensureLarkCliProfile(config);
+  await runLarkCli(buildLarkCliAttachmentArgs(config, '--image', relativeImagePath), undefined, false, cwd);
+}
+
+/**
+ * 通过 lark-cli 发送本地文件。调用方负责控制发送节奏，避免触发消息频率上限。
+ */
+export async function sendFeishuFile(
+  config: FeishuChannelConfig,
+  filePath: string
+): Promise<void> {
+  if (!config.app_id || !config.app_secret || !config.receive_id || !filePath) {
+    return;
+  }
+
+  const cwd = path.isAbsolute(filePath) ? path.dirname(filePath) : undefined;
+  const relativeFilePath = path.isAbsolute(filePath) ? `.${path.sep}${path.basename(filePath)}` : filePath;
+  await ensureLarkCliProfile(config);
+  await runLarkCli(buildLarkCliAttachmentArgs(config, '--file', relativeFilePath), undefined, false, cwd);
 }
 
 /** Notifier 接口实现：把 FeishuChannelConfig 包装成 Notifier */

@@ -1,5 +1,19 @@
-import { FeishuNotifier, sendFeishuCard, _resetFeishuTokenCache } from '../../../src/shared/notifiers/feishu';
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
+import {
+  FeishuNotifier,
+  sendFeishuCard,
+  sendFeishuFile,
+  sendFeishuImage,
+  sendFeishuText,
+} from '../../../src/shared/notifiers/feishu';
 import type { FeishuChannelConfig } from '../../../src/shared/notifiers/types';
+
+jest.mock('child_process', () => ({
+  spawn: jest.fn(),
+}));
+
+const mockedSpawn = spawn as jest.MockedFunction<typeof spawn>;
 
 const config: FeishuChannelConfig = {
   type: 'feishu',
@@ -10,88 +24,107 @@ const config: FeishuChannelConfig = {
   receive_id_type: 'chat_id',
 };
 
-type FetchMock = jest.Mock<Promise<Response>, [string, RequestInit?]>;
-
-function mockFetchSequence(responses: Array<{ ok: boolean; status?: number; body: unknown }>): FetchMock {
-  const mock = jest.fn() as FetchMock;
-  responses.forEach((r) => {
-    mock.mockResolvedValueOnce({
-      ok: r.ok,
-      status: r.status ?? (r.ok ? 200 : 500),
-      statusText: r.ok ? 'OK' : 'ERR',
-      json: async () => r.body,
-      text: async () => JSON.stringify(r.body),
-    } as unknown as Response);
+function mockSpawnExit(code: number, stderr = ''): void {
+  mockedSpawn.mockImplementationOnce(() => {
+    const proc = new EventEmitter() as ReturnType<typeof spawn>;
+    const stderrEmitter = new EventEmitter();
+    proc.stdout = new EventEmitter() as ReturnType<typeof spawn>['stdout'];
+    proc.stderr = stderrEmitter as ReturnType<typeof spawn>['stderr'];
+    process.nextTick(() => {
+      if (stderr) stderrEmitter.emit('data', Buffer.from(stderr));
+      proc.emit('close', code);
+    });
+    return proc;
   });
-  return mock;
+}
+
+function mockSuccessfulSend(): void {
+  mockSpawnExit(0);
+  mockSpawnExit(0);
+}
+
+function getSpawnArgs(): string[] {
+  const args = mockedSpawn.mock.calls[mockedSpawn.mock.calls.length - 1]?.[1];
+  if (!Array.isArray(args)) throw new Error('spawn args missing');
+  return args;
+}
+
+function getCardFromSpawn(): { header: { template: string } } {
+  const args = getSpawnArgs();
+  const contentIndex = args.indexOf('--content');
+  if (contentIndex === -1) throw new Error('--content missing');
+  return JSON.parse(args[contentIndex + 1] ?? '{}') as { header: { template: string } };
 }
 
 describe('shared feishu notifier', () => {
-  let originalFetch: typeof fetch;
-
   beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    _resetFeishuTokenCache();
+    mockedSpawn.mockReset();
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  test('sendFeishuCard caches tenant token across calls', async () => {
-    const fetchMock = mockFetchSequence([
-      { ok: true, body: { code: 0, msg: 'ok', tenant_access_token: 'tkn', expire: 7200 } },
-      { ok: true, body: { code: 0, msg: 'ok' } },
-      { ok: true, body: { code: 0, msg: 'ok' } },
-    ]);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  test('sendFeishuCard sends interactive card through lark-cli', async () => {
+    mockSuccessfulSend();
 
     await sendFeishuCard(config, 'Title 1', 'body 1');
-    await sendFeishuCard(config, 'Title 2', 'body 2');
 
-    // 1 token call + 2 message calls, token only fetched once
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const firstUrl = fetchMock.mock.calls[0]?.[0];
-    expect(firstUrl).toContain('/open-apis/auth/v3/tenant_access_token/internal');
+    expect(mockedSpawn).toHaveBeenCalledTimes(2);
+    expect(mockedSpawn).toHaveBeenNthCalledWith(
+      1,
+      'lark-cli',
+      [
+        'profile',
+        'add',
+        '--name',
+        'cli_test',
+        '--app-id',
+        'cli_test',
+        '--app-secret-stdin',
+        '--brand',
+        'feishu',
+      ],
+      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] })
+    );
+    expect(mockedSpawn).toHaveBeenNthCalledWith(
+      2,
+      'lark-cli',
+      expect.arrayContaining([
+        '--profile',
+        'cli_test',
+        'im',
+        '+messages-send',
+        '--as',
+        'bot',
+        '--chat-id',
+        'oc_chat',
+        '--msg-type',
+        'interactive',
+        '--content',
+      ]),
+      expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] })
+    );
+    expect(getCardFromSpawn().header.template).toBe('blue');
   });
 
   test('FeishuNotifier.send with level=warn uses red template', async () => {
-    const fetchMock = mockFetchSequence([
-      { ok: true, body: { code: 0, msg: 'ok', tenant_access_token: 'tkn', expire: 7200 } },
-      { ok: true, body: { code: 0, msg: 'ok' } },
-    ]);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    mockSuccessfulSend();
 
     const notifier = new FeishuNotifier(config);
     await notifier.send({ title: 'T', content: 'c', level: 'warn' });
 
-    const messageCall = fetchMock.mock.calls[1];
-    const body = JSON.parse((messageCall?.[1]?.body as string) ?? '{}') as { content: string };
-    const card = JSON.parse(body.content) as { header: { template: string } };
-    expect(card.header.template).toBe('red');
+    expect(getCardFromSpawn().header.template).toBe('red');
   });
 
   test('level=info uses blue template', async () => {
-    const fetchMock = mockFetchSequence([
-      { ok: true, body: { code: 0, msg: 'ok', tenant_access_token: 'tkn', expire: 7200 } },
-      { ok: true, body: { code: 0, msg: 'ok' } },
-    ]);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    mockSuccessfulSend();
 
     const notifier = new FeishuNotifier(config);
     await notifier.send({ title: 'T', content: 'c', level: 'info' });
 
-    const body = JSON.parse((fetchMock.mock.calls[1]?.[1]?.body as string) ?? '{}') as { content: string };
-    const card = JSON.parse(body.content) as { header: { template: string } };
-    expect(card.header.template).toBe('blue');
+    expect(getCardFromSpawn().header.template).toBe('blue');
   });
 
-  test('FeishuNotifier.send throws on API code != 0', async () => {
-    const fetchMock = mockFetchSequence([
-      { ok: true, body: { code: 0, msg: 'ok', tenant_access_token: 'tkn', expire: 7200 } },
-      { ok: true, body: { code: 9999, msg: 'nope' } },
-    ]);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  test('FeishuNotifier.send throws when lark-cli exits non-zero', async () => {
+    mockSpawnExit(0);
+    mockSpawnExit(2, 'nope');
 
     const notifier = new FeishuNotifier(config);
     await expect(
@@ -99,16 +132,93 @@ describe('shared feishu notifier', () => {
     ).rejects.toThrow(/nope/);
   });
 
-  test('sendFeishuCard is a no-op when required fields missing', async () => {
-    const fetchMock = jest.fn();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  test('continues when lark-cli profile already exists', async () => {
+    mockSpawnExit(2, 'profile "cli_test" already exists');
+    mockSpawnExit(0);
 
-    // preserves existing task-runner behavior: empty config → skip silently
+    await sendFeishuCard(config, 'Title 1', 'body 1');
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(2);
+    expect(getCardFromSpawn().header.template).toBe('blue');
+  });
+
+  test('sendFeishuCard is a no-op when required fields missing', async () => {
     await sendFeishuCard(
       { type: 'feishu', app_id: '', app_secret: '', receive_id: '' } as FeishuChannelConfig,
       'T',
       'c'
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  test('sendFeishuImage sends one local image through lark-cli', async () => {
+    mockSuccessfulSend();
+
+    await sendFeishuImage(config, '/tmp/screen.png');
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(2);
+    expect(getSpawnArgs()).toEqual(
+      expect.arrayContaining([
+        '--profile',
+        'cli_test',
+        'im',
+        '+messages-send',
+        '--chat-id',
+        'oc_chat',
+        '--image',
+        './screen.png',
+      ])
+    );
+    expect(mockedSpawn).toHaveBeenLastCalledWith(
+      'lark-cli',
+      expect.any(Array),
+      expect.objectContaining({ cwd: '/tmp' })
+    );
+  });
+
+  test('sendFeishuFile sends one local file through lark-cli', async () => {
+    mockSuccessfulSend();
+
+    await sendFeishuFile(config, '/tmp/error.txt');
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(2);
+    expect(getSpawnArgs()).toEqual(
+      expect.arrayContaining([
+        '--profile',
+        'cli_test',
+        'im',
+        '+messages-send',
+        '--chat-id',
+        'oc_chat',
+        '--file',
+        './error.txt',
+      ])
+    );
+    expect(mockedSpawn).toHaveBeenLastCalledWith(
+      'lark-cli',
+      expect.any(Array),
+      expect.objectContaining({ cwd: '/tmp' })
+    );
+  });
+
+  test('sendFeishuText sends caption text through lark-cli', async () => {
+    mockSuccessfulSend();
+
+    await sendFeishuText(config, 'caption: 主页面截图');
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(2);
+    expect(getSpawnArgs()).toEqual(
+      expect.arrayContaining([
+        '--profile',
+        'cli_test',
+        'im',
+        '+messages-send',
+        '--chat-id',
+        'oc_chat',
+        '--text',
+        'caption: 主页面截图',
+      ])
+    );
   });
 });

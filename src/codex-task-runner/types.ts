@@ -34,7 +34,7 @@ export interface DefaultsConfig {
   model: string;
   sandbox_mode: SandboxMode;
   dangerously_bypass_approvals_and_sandbox: boolean;
-  timeout_minutes: number;
+  timeout_minutes: number | null;
   on_failure: OnFailure;
 }
 
@@ -53,6 +53,7 @@ export interface TaskResult {
   costUsd: number;
   exitCode: number;
   summary: string;
+  output?: string;
 }
 
 export interface CommandOptions {

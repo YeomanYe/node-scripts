@@ -6,10 +6,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { executeTask } from '../codex-task-runner/executor';
 import { DefaultsConfig, SandboxMode, TaskConfig } from '../codex-task-runner/types';
-import { sendFeishuCard } from '../shared/notifiers/feishu';
+import { sendFeishuCard, sendFeishuFile, sendFeishuImage, sendFeishuText } from '../shared/notifiers/feishu';
 import { FeishuChannelConfig } from '../shared/notifiers/types';
+import { buildTodoDriverNotification } from '../shared/todo-driver-report';
 
 const FALLBACK_CODEX_MODEL = 'gpt-5.5';
+const FEISHU_ATTACHMENT_SEND_DELAY_MS = 1200;
 
 function readTomlSection(content: string, sectionName: string): Record<string, string> {
   const header = `[${sectionName}]`;
@@ -93,6 +95,7 @@ export function resolveLatestCodexModel(): string {
 interface MinimalTask {
   name?: string;
   prompt: string;
+  prompt_file?: string;
   workdir?: string;
   model?: string;
   sandbox_mode?: SandboxMode;
@@ -102,7 +105,7 @@ interface MinimalTask {
 interface LoopDefaults {
   workdir?: string;
   model?: string;
-  timeout_minutes?: number;
+  timeout_minutes?: number | null;
   sandbox_mode?: SandboxMode;
   dangerously_bypass?: boolean;
 }
@@ -135,7 +138,35 @@ function parseBypass(raw: unknown, where: string): boolean | undefined {
   return raw;
 }
 
-function validateTasks(raw: unknown): MinimalTask[] {
+function parseTimeoutMinutes(raw: unknown, where: string): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    throw new Error(`${where} timeout_minutes must be a finite number or null`);
+  }
+  return raw <= 0 ? null : raw;
+}
+
+function resolvePrompt(t: Record<string, unknown>, idx: number, configDir: string): Pick<MinimalTask, 'prompt' | 'prompt_file'> {
+  if (typeof t.prompt === 'string' && t.prompt) {
+    return {
+      prompt: t.prompt,
+      prompt_file: typeof t.prompt_file === 'string' ? t.prompt_file : undefined,
+    };
+  }
+  if (typeof t.prompt_file !== 'string' || !t.prompt_file) {
+    throw new Error(`task #${idx} missing required field "prompt" or "prompt_file"`);
+  }
+  const promptPath = path.isAbsolute(t.prompt_file)
+    ? t.prompt_file
+    : path.join(configDir, t.prompt_file);
+  return {
+    prompt: fs.readFileSync(promptPath, 'utf-8'),
+    prompt_file: t.prompt_file,
+  };
+}
+
+function validateTasks(raw: unknown, configDir: string): MinimalTask[] {
   if (!Array.isArray(raw)) {
     throw new Error('"tasks" must be an array');
   }
@@ -144,12 +175,10 @@ function validateTasks(raw: unknown): MinimalTask[] {
       throw new Error(`task #${idx} must be an object`);
     }
     const t = item as Record<string, unknown>;
-    if (typeof t.prompt !== 'string' || !t.prompt) {
-      throw new Error(`task #${idx} missing required field "prompt"`);
-    }
+    const prompt = resolvePrompt(t, idx, configDir);
     return {
       name: typeof t.name === 'string' ? t.name : undefined,
-      prompt: t.prompt,
+      ...prompt,
       workdir: typeof t.workdir === 'string' ? t.workdir : undefined,
       model: typeof t.model === 'string' ? t.model : undefined,
       sandbox_mode: parseSandboxMode(t.sandbox_mode, `task #${idx}`),
@@ -165,7 +194,7 @@ function validateDefaults(raw: unknown): LoopDefaults | undefined {
   return {
     workdir: typeof d.workdir === 'string' ? d.workdir : undefined,
     model: typeof d.model === 'string' ? d.model : undefined,
-    timeout_minutes: typeof d.timeout_minutes === 'number' ? d.timeout_minutes : undefined,
+    timeout_minutes: parseTimeoutMinutes(d.timeout_minutes, 'defaults'),
     sandbox_mode: parseSandboxMode(d.sandbox_mode, 'defaults'),
     dangerously_bypass: parseBypass(d.dangerously_bypass, 'defaults'),
   };
@@ -191,16 +220,17 @@ function validateFeishu(raw: unknown): FeishuChannelConfig | undefined {
   };
 }
 
-function loadConfig(configPath: string): LoopConfig {
+export function loadConfig(configPath: string): LoopConfig {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const parsed: unknown = JSON.parse(raw);
+  const configDir = path.dirname(path.resolve(configPath));
   if (Array.isArray(parsed)) {
-    return { tasks: validateTasks(parsed) };
+    return { tasks: validateTasks(parsed, configDir) };
   }
   if (typeof parsed === 'object' && parsed !== null) {
     const obj = parsed as Record<string, unknown>;
     return {
-      tasks: validateTasks(obj.tasks),
+      tasks: validateTasks(obj.tasks, configDir),
       defaults: validateDefaults(obj.defaults),
       feishu: validateFeishu(obj.feishu),
     };
@@ -238,6 +268,46 @@ async function safeNotify(
   }
 }
 
+async function safeNotifyTaskResult(
+  feishu: FeishuChannelConfig | undefined,
+  taskName: string,
+  result: Awaited<ReturnType<typeof executeTask>>,
+  iter: number,
+  totalCount: number
+): Promise<void> {
+  if (!feishu) return;
+  const message = buildTodoDriverNotification(taskName, result, iter, totalCount);
+  await safeNotify(feishu, message.title, message.content, message.level);
+  for (let i = 0; i < message.attachments.length; i++) {
+    const attachment = message.attachments[i];
+    if (i > 0 || attachment.caption) {
+      await sleep(FEISHU_ATTACHMENT_SEND_DELAY_MS);
+    }
+    if (attachment.caption) {
+      await sendFeishuText(
+        feishu,
+        [
+          `stage: ${message.stage ?? '-'}`,
+          `slug: ${message.slug ?? '-'}`,
+          `caption: ${attachment.caption}`,
+          `${attachment.type}: ${attachment.path}`,
+        ].join('\n')
+      );
+      await sleep(FEISHU_ATTACHMENT_SEND_DELAY_MS);
+    }
+    try {
+      if (attachment.type === 'image') {
+        await sendFeishuImage(feishu, attachment.path);
+      } else {
+        await sendFeishuFile(feishu, attachment.path);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[loop] feishu ${attachment.type} notify failed (${attachment.path}): ${msg}\n`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const program = new Command();
   program
@@ -246,6 +316,7 @@ async function main(): Promise<void> {
     .argument(
       '<config>',
       'JSON config: array of tasks, or {tasks, defaults?, feishu?}. ' +
+        'tasks support prompt or prompt_file. ' +
         'defaults supports: workdir, model, timeout_minutes, sandbox_mode, dangerously_bypass'
     )
     .option('-n, --count <n>', 'Iterations of the whole sequence (0 = infinite)', '0')
@@ -299,7 +370,11 @@ async function main(): Promise<void> {
     process.stdout.write(`[loop] auto-detected codex model: ${cliModel}\n`);
   }
   const effModel = cfgDefaults?.model ?? cliModel;
-  const effTimeoutMinutes = cfgDefaults?.timeout_minutes ?? parseInt(opts.timeoutMinutes, 10);
+  const cliTimeoutMinutes = parseTimeoutMinutes(Number(opts.timeoutMinutes), 'CLI');
+  const effTimeoutMinutes =
+    cfgDefaults && cfgDefaults.timeout_minutes !== undefined
+      ? cfgDefaults.timeout_minutes
+      : cliTimeoutMinutes ?? 15;
   const effSandboxMode = cfgDefaults?.sandbox_mode ?? (opts.sandboxMode as SandboxMode);
   const effBypass = cfgDefaults?.dangerously_bypass ?? Boolean(opts.dangerouslyBypass);
   const effWorkdir = cfgDefaults?.workdir ?? opts.workdir;
@@ -308,9 +383,10 @@ async function main(): Promise<void> {
 
   const countLabel = totalCount === 0 ? 'infinite' : String(totalCount);
   const modeLabel = effBypass ? 'bypass (max permission)' : `sandbox=${effSandboxMode}`;
+  const timeoutLabel = effTimeoutMinutes === null ? 'off' : `${effTimeoutMinutes}m`;
   process.stdout.write(
     `[loop] tasks=${tasks.length} count=${countLabel} interval=${intervalMs / 1000}s` +
-      ` model=${effModel} mode=${modeLabel} feishu=${feishu ? 'on' : 'off'}\n`
+      ` model=${effModel} mode=${modeLabel} timeout=${timeoutLabel} feishu=${feishu ? 'on' : 'off'}\n`
   );
 
   await safeNotify(
@@ -322,6 +398,7 @@ async function main(): Promise<void> {
       `- 间隔: ${intervalMs / 1000}s`,
       `- 模型: ${effModel}`,
       `- 权限模式: ${modeLabel}`,
+      `- 单任务超时: ${timeoutLabel}`,
       `- 失败策略: ${onFailure}`,
     ].join('\n'),
     'info'
@@ -363,22 +440,7 @@ async function main(): Promise<void> {
 
       const shouldNotify = !succeeded || notifySuccessTasks;
       if (shouldNotify) {
-        await safeNotify(
-          feishu,
-          `${succeeded ? '任务完成' : '任务失败'}: ${taskConfig.name}`,
-          [
-            `- 迭代: ${iter}${totalCount > 0 ? `/${totalCount}` : ''}`,
-            `- 状态: ${result.status}`,
-            `- 耗时: ${result.durationSec}s`,
-            `- 费用: $${result.costUsd.toFixed(4)}`,
-            '',
-            `结果:`,
-            '```',
-            result.summary,
-            '```',
-          ].join('\n'),
-          succeeded ? 'info' : 'warn'
-        );
+        await safeNotifyTaskResult(feishu, taskConfig.name, result, iter, totalCount);
       }
 
       if (!succeeded) {

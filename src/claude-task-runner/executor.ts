@@ -193,6 +193,7 @@ export async function executeTask(
             costUsd: output.total_cost_usd ?? output.cost_usd ?? 0,
             exitCode,
             summary,
+            output: output.result,
           });
         } else {
           const errorMsg = output.error ?? stderr.trim() ?? `退出码: ${exitCode}`;
@@ -208,6 +209,7 @@ export async function executeTask(
             costUsd: output.total_cost_usd ?? output.cost_usd ?? 0,
             exitCode,
             summary,
+            output: output.result ?? output.error ?? stderr,
           });
         }
       }
