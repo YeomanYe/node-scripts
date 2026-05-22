@@ -91,6 +91,100 @@ describe('codex-task-loop config', () => {
     });
   });
 
+  it('replaces template variables in config strings and prompt files', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-task-loop-'));
+    fs.writeFileSync(path.join(dir, 'task.md'), 'run ${slug} in {{repo}}\n', 'utf-8');
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        variables: {
+          slug: 'stage2',
+          repo: '/tmp/project',
+          app_id: 'app-from-vars',
+        },
+        defaults: {
+          workdir: '{{repo}}',
+        },
+        tasks: [
+          {
+            name: 'task-${slug}',
+            prompt_file: 'task.md',
+          },
+        ],
+        feishu: {
+          app_id: '${app_id}',
+          app_secret: 'secret',
+          receive_id: 'chat',
+        },
+      }),
+      'utf-8'
+    );
+
+    const config = loadConfig(file);
+
+    expect(config.defaults?.workdir).toBe('/tmp/project');
+    expect(config.tasks[0]).toMatchObject({
+      name: 'task-stage2',
+      prompt: 'run stage2 in /tmp/project\n',
+    });
+    expect(config.feishu?.app_id).toBe('app-from-vars');
+  });
+
+  it('loads variables from cc-connect feishu platform config', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-task-loop-'));
+    const ccConfig = path.join(dir, 'cc-connect.toml');
+    fs.writeFileSync(
+      ccConfig,
+      [
+        '[[projects]]',
+        'name = "codex"',
+        '[[projects.platforms]]',
+        'type = "feishu"',
+        '[projects.platforms.options]',
+        'app_id = "cli_from_cc"',
+        'app_secret = "secret_from_cc"',
+      ].join('\n'),
+      'utf-8'
+    );
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        variables: {
+          feishu_app_id: {
+            source: 'cc-connect',
+            config_path: ccConfig,
+            project: 'codex',
+            platform: 'feishu',
+            key: 'app_id',
+          },
+          feishu_app_secret: {
+            source: 'cc-connect',
+            config_path: ccConfig,
+            project: 'codex',
+            platform: 'feishu',
+            key: 'app_secret',
+          },
+        },
+        tasks: [{ prompt: 'hello' }],
+        feishu: {
+          app_id: '${feishu_app_id}',
+          app_secret: '${feishu_app_secret}',
+          receive_id: 'chat',
+        },
+      }),
+      'utf-8'
+    );
+
+    const config = loadConfig(file);
+
+    expect(config.feishu).toMatchObject({
+      app_id: 'cli_from_cc',
+      app_secret: 'secret_from_cc',
+    });
+  });
+
   it('allows disabling timeout with zero in defaults', () => {
     const file = writeTempConfig(JSON.stringify({
       defaults: {

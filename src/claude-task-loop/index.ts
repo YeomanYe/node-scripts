@@ -7,6 +7,12 @@ import { executeTask } from '../claude-task-runner/executor';
 import { DefaultsConfig, PermissionMode, TaskConfig } from '../claude-task-runner/types';
 import { sendFeishuCard, sendFeishuFile, sendFeishuImage, sendFeishuText } from '../shared/notifiers/feishu';
 import { FeishuChannelConfig } from '../shared/notifiers/types';
+import {
+  TemplateVariables,
+  collectTemplateVariables,
+  renderTemplateString,
+  renderTemplates,
+} from '../shared/template-config';
 import { buildTodoDriverNotification } from '../shared/todo-driver-report';
 
 interface MinimalTask {
@@ -49,7 +55,12 @@ function parsePermissionMode(raw: unknown, where: string): PermissionMode | unde
   return raw as PermissionMode;
 }
 
-function resolvePrompt(t: Record<string, unknown>, idx: number, configDir: string): Pick<MinimalTask, 'prompt' | 'prompt_file'> {
+function resolvePrompt(
+  t: Record<string, unknown>,
+  idx: number,
+  configDir: string,
+  variables: TemplateVariables
+): Pick<MinimalTask, 'prompt' | 'prompt_file'> {
   if (typeof t.prompt === 'string' && t.prompt) {
     return {
       prompt: t.prompt,
@@ -63,12 +74,12 @@ function resolvePrompt(t: Record<string, unknown>, idx: number, configDir: strin
     ? t.prompt_file
     : path.join(configDir, t.prompt_file);
   return {
-    prompt: fs.readFileSync(promptPath, 'utf-8'),
+    prompt: renderTemplateString(fs.readFileSync(promptPath, 'utf-8'), variables),
     prompt_file: t.prompt_file,
   };
 }
 
-function validateTasks(raw: unknown, configDir: string): MinimalTask[] {
+function validateTasks(raw: unknown, configDir: string, variables: TemplateVariables): MinimalTask[] {
   if (!Array.isArray(raw)) {
     throw new Error('"tasks" must be an array');
   }
@@ -77,7 +88,7 @@ function validateTasks(raw: unknown, configDir: string): MinimalTask[] {
       throw new Error(`task #${idx} must be an object`);
     }
     const t = item as Record<string, unknown>;
-    const prompt = resolvePrompt(t, idx, configDir);
+    const prompt = resolvePrompt(t, idx, configDir, variables);
     return {
       name: typeof t.name === 'string' ? t.name : undefined,
       ...prompt,
@@ -126,13 +137,15 @@ export function loadConfig(configPath: string): LoopConfig {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const parsed: unknown = JSON.parse(raw);
   const configDir = path.dirname(path.resolve(configPath));
-  if (Array.isArray(parsed)) {
-    return { tasks: validateTasks(parsed, configDir) };
+  const variables = collectTemplateVariables(parsed);
+  const rendered = renderTemplates(parsed, variables);
+  if (Array.isArray(rendered)) {
+    return { tasks: validateTasks(rendered, configDir, variables) };
   }
-  if (typeof parsed === 'object' && parsed !== null) {
-    const obj = parsed as Record<string, unknown>;
+  if (typeof rendered === 'object' && rendered !== null) {
+    const obj = rendered as Record<string, unknown>;
     return {
-      tasks: validateTasks(obj.tasks, configDir),
+      tasks: validateTasks(obj.tasks, configDir, variables),
       defaults: validateDefaults(obj.defaults),
       feishu: validateFeishu(obj.feishu),
     };

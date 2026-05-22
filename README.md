@@ -13,6 +13,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
 | [codex-task-runner](#codex-task-runner) | Codex 自动化任务调度 |
+| [task-loop](#task-loop) | Claude / Codex 循环任务执行 |
 | [skill-doctor](#skill-doctor) | Claude skills 仓库体检（lint） |
 
 ## 安装
@@ -386,6 +387,50 @@ defaults:
 ```
 
 详细文档：[docs/claude-task-runner.md](docs/claude-task-runner.md)
+
+---
+
+## Task-Loop
+
+`claude-task-loop` 和 `codex-task-loop` 使用 JSON 配置循环执行任务。配置支持顶层 `variables`，会在所有字符串字段和 `prompt_file` 内容中替换 `${name}` 或 `{{name}}` 模板。
+
+变量可以写字面量，也可以从 `~/.cc-connect/config.toml` 读取指定项目的飞书平台配置：
+
+```json
+{
+  "variables": {
+    "repo": "/Users/ym/Documents/projects/node-scripts",
+    "feishu_app_id": {
+      "source": "cc-connect",
+      "project": "codex",
+      "platform": "feishu",
+      "key": "app_id"
+    },
+    "feishu_app_secret": {
+      "source": "cc-connect",
+      "project": "codex",
+      "platform": "feishu",
+      "key": "app_secret"
+    }
+  },
+  "defaults": {
+    "workdir": "${repo}"
+  },
+  "tasks": [
+    {
+      "name": "daily-check",
+      "prompt_file": "prompts/daily.md"
+    }
+  ],
+  "feishu": {
+    "app_id": "${feishu_app_id}",
+    "app_secret": "${feishu_app_secret}",
+    "domain": "https://open.feishu.cn",
+    "receive_id": "chat_id_or_open_id",
+    "receive_id_type": "chat_id"
+  }
+}
+```
 
 ---
 
