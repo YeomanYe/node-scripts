@@ -3,7 +3,8 @@ import * as path from 'path';
 import type { Finding, Rule } from '../types';
 import { parseFrontmatter } from '../utils/frontmatter';
 
-const DESCRIPTION_MAX = 250;
+const DESCRIPTION_SOFT_MAX = 250;
+const DESCRIPTION_HARD_MAX = 1000;
 
 export const frontmatterRule: Rule = {
   id: 'frontmatter',
@@ -49,13 +50,21 @@ export const frontmatterRule: Rule = {
           file: rel,
           message: 'missing "description" field',
         });
-      } else if (description.length > DESCRIPTION_MAX) {
+      } else if (description.length > DESCRIPTION_HARD_MAX) {
+        findings.push({
+          rule: 'frontmatter',
+          level: 'error',
+          skill: skill.name,
+          file: rel,
+          message: `description length ${description.length} exceeds ${DESCRIPTION_HARD_MAX} (hard limit; please shrink — long descriptions get truncated by agent harnesses and hurt skill recall)`,
+        });
+      } else if (description.length > DESCRIPTION_SOFT_MAX) {
         findings.push({
           rule: 'frontmatter',
           level: 'warn',
           skill: skill.name,
           file: rel,
-          message: `description length ${description.length} exceeds 250 (may be truncated)`,
+          message: `description length ${description.length} exceeds ${DESCRIPTION_SOFT_MAX} (may be truncated; upgrades to ERROR at ${DESCRIPTION_HARD_MAX})`,
         });
       }
     }
