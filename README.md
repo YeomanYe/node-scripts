@@ -16,6 +16,9 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [task-loop](#task-loop) | Claude / Codex 循环任务执行 |
 | [skill-doctor](#skill-doctor) | Claude skills 仓库体检（lint） |
 
+> **🚚 已迁出**: `skill-recall`(agent 日志分析 + skill 调优)曾在本仓库 `src/skill-recall/`,
+> 2026-05-29 拆为独立 monorepo: [agent-sessions-manager](https://github.com/YeomanYe/agent-sessions-manager) — 为未来 webui 留扩展空间。
+
 ## 安装
 
 ```bash
