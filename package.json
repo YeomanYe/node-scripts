@@ -17,7 +17,8 @@
     "git-pull-poll": "dist/git-pull-poll/index.js",
     "boot-tasks": "dist/boot-tasks/index.js",
     "skill-doctor": "dist/skill-doctor/index.js",
-    "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js"
+    "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js",
+    "system-monitor": "dist/system-monitor/index.js"
   },
   "scripts": {
     "build": "tsc",
