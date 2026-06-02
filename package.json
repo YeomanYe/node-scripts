@@ -15,6 +15,7 @@
     "codex-task-runner": "dist/codex-task-runner/index.js",
     "codex-task-loop": "dist/codex-task-loop/index.js",
     "git-pull-poll": "dist/git-pull-poll/index.js",
+    "boot-tasks": "dist/boot-tasks/index.js",
     "skill-doctor": "dist/skill-doctor/index.js",
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js"
   },
