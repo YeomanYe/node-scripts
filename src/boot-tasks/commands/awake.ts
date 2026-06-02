@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { Command } from 'commander';
+import { notifyEnd, notifyStart } from '../shared/notify';
 
 const CAFFEINATE = '/usr/bin/caffeinate';
 
@@ -21,28 +22,46 @@ function buildArgs(opts: AwakeOptions): string[] {
   return args;
 }
 
-function runAwake(opts: AwakeOptions): void {
+async function runAwake(opts: AwakeOptions): Promise<void> {
   const args = buildArgs(opts);
   if (args.length === 0) {
     console.error('[boot-tasks awake] 至少需要启用一种保持唤醒模式(-d / -i / -m / -s)');
     process.exit(2);
   }
 
+  const startTime = new Date();
   console.log(`[boot-tasks awake] spawn ${CAFFEINATE} ${args.join(' ')}`);
+
+  await notifyStart({
+    command: 'awake',
+    summary: `**caffeinate args**: \`${args.join(' ')}\`\n**进程类型**: 常驻(由 pm2 管理生命周期)`,
+  });
 
   const child = spawn(CAFFEINATE, args, { stdio: 'inherit' });
 
-  child.on('exit', (code, signal) => {
-    if (signal) {
-      console.log(`[boot-tasks awake] caffeinate exited by signal ${signal}`);
-      process.exit(0);
-    }
-    console.log(`[boot-tasks awake] caffeinate exited with code ${code}`);
+  child.on('exit', async (code, signal) => {
+    const endTime = new Date();
+    const status = code === 0 || signal ? 'success' : 'failed';
+    await notifyEnd({
+      command: 'awake',
+      startTime,
+      endTime,
+      status,
+      summary: signal ? `**信号**: ${signal}` : `**exit code**: ${code}`,
+    });
     process.exit(code ?? 0);
   });
 
-  child.on('error', (err) => {
+  child.on('error', async (err) => {
+    const endTime = new Date();
     console.error(`[boot-tasks awake] failed to spawn caffeinate:`, err);
+    await notifyEnd({
+      command: 'awake',
+      startTime,
+      endTime,
+      status: 'failed',
+      error: err.message,
+    });
     process.exit(1);
   });
 
@@ -65,5 +84,5 @@ export function registerAwake(program: Command): void {
     .option('--no-display', '不阻止显示器睡眠')
     .option('--no-idle', '不阻止系统 idle 睡眠')
     .option('--no-disk', '不阻止磁盘 idle 睡眠')
-    .action((opts: AwakeOptions) => runAwake(opts));
+    .action(async (opts: AwakeOptions) => { await runAwake(opts); });
 }

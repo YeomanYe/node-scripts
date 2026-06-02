@@ -10,9 +10,11 @@
 
 import { Command } from 'commander';
 import { registerAwake } from './commands/awake';
+import { registerLoadEnv } from './commands/load-env';
 
 const SUBCOMMANDS: Array<(program: Command) => void> = [
   registerAwake,
+  registerLoadEnv,
 ];
 
 function main(): void {
