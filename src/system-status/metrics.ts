@@ -115,7 +115,7 @@ async function sampleMemory(): Promise<MemorySample> {
   };
 }
 
-interface DfRow { mount: string; totalKB: number; usedKB: number; }
+interface DfRow { mount: string; totalKB: number; usedKB: number; availKB: number; }
 
 export function parseDf(stdout: string): DfRow[] {
   const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -131,12 +131,14 @@ export function parseDf(stdout: string): DfRow[] {
     if (blocksIdx === -1 || blocksIdx + 4 >= tokens.length) continue;
     const totalKB = parseInt(tokens[blocksIdx], 10);
     const usedKB = parseInt(tokens[blocksIdx + 1], 10);
+    const availKB = parseInt(tokens[blocksIdx + 2], 10);
     const cap = tokens[blocksIdx + 3];
     if (!/%$/.test(cap)) continue;
     const mount = tokens.slice(blocksIdx + 4).join(' ');
     if (!mount.startsWith('/')) continue;
     if (!Number.isFinite(totalKB) || totalKB <= 0) continue;
-    rows.push({ mount, totalKB, usedKB });
+    if (!Number.isFinite(availKB) || availKB < 0) continue;
+    rows.push({ mount, totalKB, usedKB, availKB });
   }
   return rows;
 }
@@ -158,12 +160,17 @@ async function sampleDisks(wanted: string[]): Promise<DiskSample[]> {
   try {
     const stdout = await runCommand('df', ['-kP'], 5000);
     const rows = filterDisks(parseDf(stdout), wanted);
-    return rows.map((r) => ({
-      mount: r.mount,
-      usedBytes: r.usedKB * 1024,
-      totalBytes: r.totalKB * 1024,
-      percent: r.totalKB > 0 ? (r.usedKB / r.totalKB) * 100 : 0,
-    }));
+    return rows.map((r) => {
+      // 与 df Capacity 列一致:used / (used + avail);APFS 容器共享空间时,
+      // 仅以 totalKB(容器大小)作分母会让单卷使用率被严重低估
+      const denomKB = r.usedKB + r.availKB;
+      return {
+        mount: r.mount,
+        usedBytes: r.usedKB * 1024,
+        totalBytes: denomKB * 1024,
+        percent: denomKB > 0 ? (r.usedKB / denomKB) * 100 : 0,
+      };
+    });
   } catch {
     return [];
   }
@@ -201,7 +208,9 @@ export interface CollectOptions {
 
 export async function collectSample(options: CollectOptions = {}): Promise<SystemSample> {
   const cpuSampleMs = options.cpuSampleMs ?? 800;
-  const disksWanted = options.disks ?? ['/'];
+  // macOS APFS:`/` 是只读系统卷(用量很少且无变化),用户实际数据在 /System/Volumes/Data
+  const defaultDisks = process.platform === 'darwin' ? ['/System/Volumes/Data'] : ['/'];
+  const disksWanted = options.disks ?? defaultDisks;
   const [cpuPercent, memory, disks, battery] = await Promise.all([
     sampleCpuPercent(cpuSampleMs),
     sampleMemory(),

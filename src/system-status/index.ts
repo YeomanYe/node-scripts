@@ -213,13 +213,14 @@ async function main(): Promise<void> {
 
   const opts = program.opts<CliOptions>();
 
+  // 不传 --disks 时让 collectSample 选平台默认值(darwin: /System/Volumes/Data)
   const disks = opts.disks === undefined
-    ? ['/']
+    ? undefined
     : opts.disks.length === 0
       ? []
       : opts.disks.split(',').map((s) => s.trim()).filter(Boolean);
 
-  const sample = await collectSample({ disks });
+  const sample = await collectSample(disks === undefined ? {} : { disks });
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(sample, null, 2) + '\n');
