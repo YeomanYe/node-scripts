@@ -18,7 +18,7 @@
     "boot-tasks": "dist/boot-tasks/index.js",
     "skill-doctor": "dist/skill-doctor/index.js",
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js",
-    "system-monitor": "dist/system-monitor/index.js"
+    "system-status": "dist/system-status/index.js"
   },
   "scripts": {
     "build": "tsc",
