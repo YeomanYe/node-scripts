@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'child_process';
+import * as crypto from 'crypto';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
@@ -76,7 +77,7 @@ function buildUpdateContent(changedRepos: ChangedRepo[]): string {
     return `- ${repoName(repo.path)}: ${formatSnapshotRef(repo.before)} -> ${formatSnapshotRef(repo.after)}`;
   });
   if (changedRepos.length > 20) {
-    lines.push(`- 另外 ${changedRepos.length - 20} 个仓库有更新`);
+    lines.push(`- 另外 ${changedRepos.length - 20} 个来源有更新`);
   }
   return [`已执行 \`skillshare update --all\` 和 \`skillshare sync --all\`。`, '', ...lines].join('\n');
 }
@@ -251,7 +252,7 @@ export async function runSkillshareSyncNotify(
       level: auditBlocked ? 'warn' : 'info',
     });
     deps.log(
-      `[${new Date().toISOString()}] skillshare-sync-notify: synced ${changedRepos.length} updated repos`
+      `[${new Date().toISOString()}] skillshare-sync-notify: synced ${changedRepos.length} updated sources`
       + (auditBlocked ? ' after skip-audit retry' : '')
     );
     return { status: 'updated', changedRepos };
@@ -278,7 +279,8 @@ export async function collectGitSnapshot(
   command: (cmd: string, args: string[], cwd: string) => Promise<RunResult> = runCommand
 ): Promise<GitSnapshot> {
   const trackedRoots = await collectTrackedRepoRoots(root);
-  const repos = trackedRoots.length > 0 ? trackedRoots : await findGitRepos(root);
+  const subdirSkills = await collectGithubSubdirSkillRoots(root);
+  const repos = trackedRoots.length > 0 || subdirSkills.length > 0 ? trackedRoots : await findGitRepos(root);
   const snapshot = new Map<string, string>();
   for (const repo of repos) {
     const head = await command('git', ['rev-parse', 'HEAD'], repo);
@@ -287,17 +289,33 @@ export async function collectGitSnapshot(
       snapshot.set(repo, [head.stdout.trim(), status.code === 0 ? status.stdout.trim() : ''].join('\n'));
     }
   }
+  for (const skill of subdirSkills) {
+    snapshot.set(skill.path, await hashGithubSubdirSkill(skill));
+  }
   return snapshot;
 }
 
 interface SkillshareMetadata {
-  entries?: Record<string, { tracked?: unknown; source?: unknown; branch?: unknown } | undefined>;
+  entries?: Record<string, SkillshareMetadataEntry | undefined>;
+}
+
+interface SkillshareMetadataEntry {
+  tracked?: unknown;
+  source?: unknown;
+  branch?: unknown;
+  type?: unknown;
+  repo_url?: unknown;
+  subdir?: unknown;
+  version?: unknown;
+  tree_hash?: unknown;
+  file_hashes?: unknown;
 }
 
 interface TrackedMetadataFile {
   path: string;
   text: string;
   installs: SkillshareInstallSpec[];
+  subdirSkills: SkillshareSubdirSpec[];
 }
 
 interface SkillshareInstallSpec {
@@ -306,8 +324,18 @@ interface SkillshareInstallSpec {
   branch?: string;
 }
 
-function hasTrackedMetadataEntry(metadata: SkillshareMetadata | null): boolean {
-  return Object.values(metadata?.entries ?? {}).some((entry) => entry?.tracked === true);
+interface SkillshareSubdirSpec {
+  name: string;
+  path: string;
+  entry: SkillshareMetadataEntry;
+}
+
+function isGithubSubdirEntry(entry: SkillshareMetadataEntry | undefined): entry is SkillshareMetadataEntry {
+  return entry?.type === 'github-subdir';
+}
+
+function hasSyncableMetadataEntry(metadata: SkillshareMetadata | null): boolean {
+  return Object.values(metadata?.entries ?? {}).some((entry) => entry?.tracked === true || isGithubSubdirEntry(entry));
 }
 
 function trackedMetadataInstallSpecs(metadata: SkillshareMetadata | null): SkillshareInstallSpec[] {
@@ -326,16 +354,33 @@ function trackedMetadataInstallSpecs(metadata: SkillshareMetadata | null): Skill
   return installs.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function githubSubdirMetadataSpecs(root: string, metadata: SkillshareMetadata | null): SkillshareSubdirSpec[] {
+  const skillsDir = path.join(root, 'skills');
+  const skills: SkillshareSubdirSpec[] = [];
+  for (const [key, entry] of Object.entries(metadata?.entries ?? {})) {
+    if (!isGithubSubdirEntry(entry)) continue;
+    skills.push({
+      name: key,
+      path: path.join(skillsDir, key),
+      entry,
+    });
+  }
+
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function readTrackedMetadataFile(root: string): Promise<TrackedMetadataFile | undefined> {
   const metadataFiles = ['.metadata.json', 'meta.json'];
   for (const metadataFile of metadataFiles) {
     try {
       const metadataPath = path.join(root, 'skills', metadataFile);
       const text = await fs.readFile(metadataPath, 'utf8');
+      const metadata = JSON.parse(text) as SkillshareMetadata | null;
       return {
         path: metadataPath,
         text,
-        installs: trackedMetadataInstallSpecs(JSON.parse(text) as SkillshareMetadata | null),
+        installs: trackedMetadataInstallSpecs(metadata),
+        subdirSkills: githubSubdirMetadataSpecs(root, metadata),
       };
     } catch {
       // Try the next metadata filename.
@@ -346,7 +391,32 @@ async function readTrackedMetadataFile(root: string): Promise<TrackedMetadataFil
 
 async function restoreMetadataFile(metadata: TrackedMetadataFile | undefined): Promise<void> {
   if (!metadata) return;
-  await fs.writeFile(metadata.path, metadata.text);
+  if (metadata.subdirSkills.length === 0) {
+    await fs.writeFile(metadata.path, metadata.text);
+    return;
+  }
+
+  let preserved: SkillshareMetadata;
+  let current: SkillshareMetadata;
+  try {
+    preserved = JSON.parse(metadata.text) as SkillshareMetadata;
+    current = JSON.parse(await fs.readFile(metadata.path, 'utf8')) as SkillshareMetadata;
+  } catch {
+    await fs.writeFile(metadata.path, metadata.text);
+    return;
+  }
+
+  current.entries = current.entries ?? {};
+  for (const [key, entry] of Object.entries(preserved.entries ?? {})) {
+    if (!entry) continue;
+    if (isGithubSubdirEntry(entry)) {
+      current.entries[key] = current.entries[key] ?? entry;
+    } else {
+      current.entries[key] = entry;
+    }
+  }
+
+  await fs.writeFile(metadata.path, `${JSON.stringify(current, null, 2)}\n`);
 }
 
 async function isTrackedRepoInstalled(root: string, install: SkillshareInstallSpec): Promise<boolean> {
@@ -424,7 +494,7 @@ export async function collectTrackedMetadataRoots(root: string): Promise<string[
     for (const metadataFile of metadataFiles) {
       try {
         const text = await fs.readFile(path.join(absoluteSourceDir, metadataFile), 'utf8');
-        if (hasTrackedMetadataEntry(JSON.parse(text) as SkillshareMetadata | null)) {
+        if (hasSyncableMetadataEntry(JSON.parse(text) as SkillshareMetadata | null)) {
           trackedRoots.push(absoluteSourceDir);
           break;
         }
@@ -452,6 +522,68 @@ async function collectTrackedRepoRoots(root: string): Promise<string[]> {
     }
   }
   return roots.sort();
+}
+
+async function collectGithubSubdirSkillRoots(root: string): Promise<SkillshareSubdirSpec[]> {
+  const metadata = await readTrackedMetadataFile(root);
+  if (!metadata) return [];
+
+  const skills: SkillshareSubdirSpec[] = [];
+  for (const skill of metadata.subdirSkills) {
+    try {
+      const stat = await fs.stat(skill.path);
+      if (stat.isDirectory()) {
+        skills.push(skill);
+      }
+    } catch {
+      // Missing single-skill installs can be restored by skillshare update; skip them before that happens.
+    }
+  }
+  return skills.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function fingerprintGithubSubdirEntry(entry: SkillshareMetadataEntry): Record<string, unknown> {
+  return {
+    source: entry.source,
+    repo_url: entry.repo_url,
+    subdir: entry.subdir,
+    version: entry.version,
+    tree_hash: entry.tree_hash,
+    file_hashes: entry.file_hashes,
+  };
+}
+
+async function hashGithubSubdirSkill(skill: SkillshareSubdirSpec): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  hash.update(JSON.stringify(fingerprintGithubSubdirEntry(skill.entry)));
+
+  async function visit(dir: string, relativeDir = ''): Promise<void> {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name === '.git' || entry.name === '.DS_Store') continue;
+      const relativePath = path.join(relativeDir, entry.name);
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        hash.update(`dir:${relativePath}\n`);
+        await visit(absolutePath, relativePath);
+      } else if (entry.isSymbolicLink()) {
+        hash.update(`link:${relativePath}:${await fs.readlink(absolutePath)}\n`);
+      } else if (entry.isFile()) {
+        hash.update(`file:${relativePath}:`);
+        hash.update(await fs.readFile(absolutePath));
+        hash.update('\n');
+      }
+    }
+  }
+
+  await visit(skill.path);
+  return `${hash.digest('hex')}\n`;
 }
 
 async function findGitRepos(root: string): Promise<string[]> {

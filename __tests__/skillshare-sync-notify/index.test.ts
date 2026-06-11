@@ -291,6 +291,27 @@ describe('skillshare-sync-notify', () => {
     await expect(collectTrackedMetadataRoots(root)).resolves.toEqual([path.join(root, 'skills')]);
   });
 
+  test('collectTrackedMetadataRoots includes source roots with github-subdir metadata entries', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    await fs.mkdir(path.join(root, 'skills'), { recursive: true });
+    await fs.writeFile(path.join(root, 'skills', '.metadata.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        pdf: {
+          source: 'github.com/anthropics/skills/skills/pdf',
+          type: 'github-subdir',
+          repo_url: 'https://github.com/anthropics/skills.git',
+          subdir: 'skills/pdf',
+          version: 'old',
+          tree_hash: 'old-tree',
+          file_hashes: {},
+        },
+      },
+    }));
+
+    await expect(collectTrackedMetadataRoots(root)).resolves.toEqual([path.join(root, 'skills')]);
+  });
+
   test('collectGitSnapshot snapshots tracked skillshare repositories instead of unrelated nested repos', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
     const skillsDir = path.join(root, 'skills');
@@ -317,6 +338,98 @@ describe('skillshare-sync-notify', () => {
     expect(Array.from(snapshot.keys())).toEqual([path.join(skillsDir, '_tracked')]);
     expect(snapshot.get(path.join(skillsDir, '_tracked'))).toBe(`${path.join(skillsDir, '_tracked')}-head\n`);
     expect(command).toHaveBeenCalledTimes(2);
+  });
+
+  test('collectGitSnapshot snapshots github-subdir skill contents without requiring git repos', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    const skillsDir = path.join(root, 'skills');
+    const pdfDir = path.join(skillsDir, 'pdf');
+    await fs.mkdir(pdfDir, { recursive: true });
+    await fs.writeFile(path.join(pdfDir, 'SKILL.md'), 'old\n');
+    await fs.writeFile(path.join(skillsDir, '.metadata.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        pdf: {
+          source: 'github.com/anthropics/skills/skills/pdf',
+          type: 'github-subdir',
+          repo_url: 'https://github.com/anthropics/skills.git',
+          subdir: 'skills/pdf',
+          version: 'old',
+          tree_hash: 'old-tree',
+          file_hashes: {
+            'SKILL.md': 'sha256:old',
+          },
+        },
+      },
+    }));
+    const command = jest.fn(async () => ({ code: 0, stdout: '', stderr: '' }));
+
+    const before = await collectGitSnapshot(root, command);
+    await fs.writeFile(path.join(pdfDir, 'SKILL.md'), 'new\n');
+    const after = await collectGitSnapshot(root, command);
+
+    expect(Array.from(before.keys())).toEqual([pdfDir]);
+    expect(Array.from(after.keys())).toEqual([pdfDir]);
+    expect(before.get(pdfDir)).not.toBe(after.get(pdfDir));
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  test('preserves local metadata entries while keeping github-subdir update metadata', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    const metadataPath = path.join(root, 'skills', '.metadata.json');
+    await fs.mkdir(path.join(root, 'skills', 'pdf'), { recursive: true });
+    await fs.writeFile(metadataPath, JSON.stringify({
+      version: 1,
+      entries: {
+        local: { source: '/tmp/local', tracked: false },
+        pdf: {
+          source: 'github.com/anthropics/skills/skills/pdf',
+          type: 'github-subdir',
+          repo_url: 'https://github.com/anthropics/skills.git',
+          subdir: 'skills/pdf',
+          version: 'old',
+          tree_hash: 'old-tree',
+          file_hashes: {
+            'SKILL.md': 'sha256:old',
+          },
+        },
+      },
+    }, null, 2));
+    const deps = createDeps({
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValueOnce(snapshot([[path.join(root, 'skills', 'pdf'), 'same']]))
+        .mockResolvedValueOnce(snapshot([[path.join(root, 'skills', 'pdf'), 'same']])),
+      runCommand: jest.fn(async (_cmd, args) => {
+        if (args[0] === 'update') {
+          await fs.writeFile(metadataPath, JSON.stringify({
+            version: 1,
+            entries: {
+              pdf: {
+                source: 'github.com/anthropics/skills/skills/pdf',
+                type: 'github-subdir',
+                repo_url: 'https://github.com/anthropics/skills.git',
+                subdir: 'skills/pdf',
+                version: 'new',
+                tree_hash: 'new-tree',
+                file_hashes: {
+                  'SKILL.md': 'sha256:new',
+                },
+              },
+            },
+          }, null, 2));
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      }),
+    });
+
+    const result = await runSkillshareSyncNotify({ skillshareRoot: root }, deps);
+    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+
+    expect(result.status).toBe('unchanged');
+    expect(metadata.entries.local).toEqual({ source: '/tmp/local', tracked: false });
+    expect(metadata.entries.pdf.version).toBe('new');
+    expect(metadata.entries.pdf.tree_hash).toBe('new-tree');
   });
 
   test('sends warn notification when skillshare update fails', async () => {
