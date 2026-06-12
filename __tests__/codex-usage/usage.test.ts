@@ -54,4 +54,34 @@ describe('codex-usage/usage', () => {
     expect(snapshot.primary?.usedPercent).toBe(2);
     expect(snapshot.secondary?.windowMinutes).toBe(10080);
   });
+
+  it('treats null additional_rate_limits as no additional limits', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          plan_type: 'pro',
+          rate_limit: {
+            primary_window: {
+              used_percent: 2,
+              limit_window_seconds: 18000,
+              reset_at: 1775670982,
+            },
+            secondary_window: null,
+          },
+          additional_rate_limits: null,
+          credits: null,
+        }),
+    }) as typeof fetch;
+
+    const snapshot = await getUsageSnapshot({
+      accessToken: 'access-token',
+      accountId: 'workspace-123',
+      baseUrl: 'https://chatgpt.com/backend-api',
+    });
+
+    expect(snapshot.additional).toEqual([]);
+    expect(snapshot.primary?.windowMinutes).toBe(300);
+  });
 });

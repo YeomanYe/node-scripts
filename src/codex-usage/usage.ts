@@ -29,6 +29,8 @@ const usagePayloadSchema = z.object({
         rate_limit: rateLimitDetailsSchema,
       })
     )
+    .nullable()
+    .transform((limits) => limits ?? [])
     .default([]),
   credits: z
     .object({
