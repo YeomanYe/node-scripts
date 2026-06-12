@@ -451,6 +451,50 @@ describe('skillshare-sync-notify', () => {
     }));
   });
 
+  test('includes timeout context when skillshare update times out', async () => {
+    const deps = createDeps({
+      getSnapshot: jest.fn(async () => snapshot([['/skills/a', 'aaa']])),
+      runCommand: jest.fn(async () => ({
+        code: -1,
+        stdout: 'Updating 1 skills from https://github.com/remorses/playwriter.git',
+        stderr: '',
+        timedOut: true,
+        timeoutMs: 300000,
+        signal: 'SIGKILL' as NodeJS.Signals,
+      })),
+    });
+
+    const result = await runSkillshareSyncNotify({
+      skillshareRoot: '/tmp/skillshare',
+      feishu: { type: 'feishu', app_id: 'cli_test', app_secret: 'secret', receive_id: 'chat' },
+    }, deps);
+
+    expect(result.status).toBe('failed');
+    expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Skillshare 同步失败',
+      level: 'warn',
+      content: expect.stringContaining('command timed out after 300s'),
+    }));
+    expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Updating 1 skills from https://github.com/remorses/playwriter.git'),
+    }));
+  });
+
+  test('runCommand marks commands killed by timeout', async () => {
+    const result = await runCommand(
+      process.execPath,
+      ['-e', "process.stdout.write('started\\n'); setInterval(() => {}, 1000);"],
+      process.cwd(),
+      200
+    );
+
+    expect(result.code).toBe(-1);
+    expect(result.timedOut).toBe(true);
+    expect(result.timeoutMs).toBe(200);
+    expect(result.signal).toBe('SIGKILL');
+    expect(result.stdout).toContain('started');
+  });
+
   test('retries with skip-audit when update completed with audit-blocked repositories', async () => {
     const deps = createDeps({
       getSnapshot: jest

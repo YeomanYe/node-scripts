@@ -11,7 +11,8 @@ import { sendFeishuCard } from '../shared/notifiers/feishu';
 import type { FeishuChannelConfig, NotifierMessage } from '../shared/notifiers/types';
 
 const DEFAULT_SKILLSHARE_ROOT = path.join(os.homedir(), '.config/skillshare');
-const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_COMMAND_TIMEOUT_MS = 12 * 60_000;
+const COMMAND_OUTPUT_LINE_LIMIT = 12;
 
 export type GitSnapshot = Map<string, string>;
 
@@ -19,6 +20,9 @@ export interface RunResult {
   code: number;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
+  timeoutMs?: number;
+  signal?: NodeJS.Signals | null;
 }
 
 export interface ChangedRepo {
@@ -67,9 +71,34 @@ function formatSnapshotRef(value: string | undefined): string {
 }
 
 function compactOutput(result: RunResult): string {
+  const metaLines: string[] = [];
+  if (result.timedOut) {
+    metaLines.push(`command timed out after ${formatDuration(result.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS)}`);
+  }
+  if (result.signal) {
+    metaLines.push(`terminated by signal ${result.signal}`);
+  }
+
   const text = `${result.stderr}\n${result.stdout}`.trim();
-  if (!text) return `exit code ${result.code}`;
-  return text.split('\n').map((line) => line.trim()).filter(Boolean).slice(-12).join('\n');
+  const outputLines = text
+    ? text.split('\n').map((line) => line.trim()).filter(Boolean)
+    : [`exit code ${result.code}`];
+  const outputLimit = Math.max(1, COMMAND_OUTPUT_LINE_LIMIT - metaLines.length);
+  return [...metaLines, ...outputLines.slice(-outputLimit)].join('\n');
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  return `${ms}ms`;
+}
+
+function readCommandTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.SKILLSHARE_SYNC_COMMAND_TIMEOUT_MS || env.SKILLSHARE_COMMAND_TIMEOUT_MS;
+  if (!raw) return DEFAULT_COMMAND_TIMEOUT_MS;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_COMMAND_TIMEOUT_MS;
+  return Math.trunc(parsed);
 }
 
 function buildUpdateContent(changedRepos: ChangedRepo[]): string {
@@ -617,18 +646,29 @@ export function runCommand(
   cmd: string,
   args: string[],
   cwd: string,
-  timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS
+  timeoutMs = readCommandTimeoutMs()
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, { cwd, env: process.env });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => proc.kill('SIGKILL'), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGKILL');
+    }, timeoutMs);
     proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    proc.on('close', (code) => {
+    proc.on('close', (code, signal) => {
       clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr });
+      resolve({
+        code: code ?? -1,
+        stdout,
+        stderr,
+        timedOut: timedOut || undefined,
+        timeoutMs: timedOut ? timeoutMs : undefined,
+        signal,
+      });
     });
     proc.on('error', (err) => {
       clearTimeout(timer);
