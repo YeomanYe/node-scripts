@@ -13,6 +13,17 @@ import type { FeishuChannelConfig, NotifierMessage } from '../shared/notifiers/t
 const DEFAULT_SKILLSHARE_ROOT = path.join(os.homedir(), '.config/skillshare');
 const DEFAULT_COMMAND_TIMEOUT_MS = 12 * 60_000;
 const COMMAND_OUTPUT_LINE_LIMIT = 12;
+const SYNC_CONFIG_RELATIVE_PATHS = [
+  'config.yaml',
+  'skills/.metadata.json',
+  'skills/meta.json',
+  'agents/.metadata.json',
+  'agents/meta.json',
+  'skills/.skillignore',
+  'agents/.skillignore',
+  'skills/.gitignore',
+  'agents/.gitignore',
+];
 
 export type GitSnapshot = Map<string, string>;
 
@@ -38,6 +49,7 @@ interface AuditBlockedUpdate {
 
 export interface SkillshareSyncConfig {
   skillshareRoot: string;
+  stateFile?: string;
   feishu?: FeishuChannelConfig;
 }
 
@@ -52,6 +64,13 @@ export type SkillshareSyncResult =
   | { status: 'updated'; changedRepos: ChangedRepo[] }
   | { status: 'unchanged' }
   | { status: 'failed'; reason: string };
+
+export type ConfigSnapshot = Record<string, string>;
+
+interface SkillshareSyncState {
+  configSnapshot?: ConfigSnapshot;
+  updatedAt?: string;
+}
 
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
@@ -199,8 +218,13 @@ export async function runSkillshareSyncNotify(
   deps: SkillshareSyncDeps = createDefaultDeps(config)
 ): Promise<SkillshareSyncResult> {
   const preservedMetadata = await readTrackedMetadataFile(config.skillshareRoot);
+  const preservedGitignores = await readSkillshareGitignoreFiles(config.skillshareRoot);
+  const previousConfigSnapshot = await readPreviousConfigSnapshot(config.stateFile);
+  const beforeConfigSnapshot = await collectSyncConfigSnapshot(config.skillshareRoot);
+  const persistedConfigChanged = previousConfigSnapshot !== undefined
+    && !isSameConfigSnapshot(previousConfigSnapshot, beforeConfigSnapshot);
   try {
-    const restore = await ensureTrackedReposInstalled(config, deps, preservedMetadata);
+    const restore = await ensureTrackedReposInstalled(config, deps, preservedMetadata, preservedGitignores);
     if (restore.code !== 0) {
       const reason = compactOutput(restore);
       await maybeNotify(config, deps, {
@@ -213,8 +237,7 @@ export async function runSkillshareSyncNotify(
 
     const before = await deps.getSnapshot(config.skillshareRoot);
     const update = await deps.runCommand('skillshare', ['update', '--all'], config.skillshareRoot);
-    await restoreMetadataFile(preservedMetadata);
-    await normalizeSkillsGitignore(config.skillshareRoot);
+    let sourceLayoutChanged = await restoreSkillshareState(config.skillshareRoot, preservedMetadata, preservedGitignores);
     let auditBlocked: AuditBlockedUpdate | undefined;
     if (isContinuableUpdateFailure(update)) {
       auditBlocked = {
@@ -222,8 +245,7 @@ export async function runSkillshareSyncNotify(
         skills: extractAuditBlockedSkills(update),
       };
       const retry = await deps.runCommand('skillshare', ['update', '--all', '--skip-audit'], config.skillshareRoot);
-      await restoreMetadataFile(preservedMetadata);
-      await normalizeSkillsGitignore(config.skillshareRoot);
+      sourceLayoutChanged = (await restoreSkillshareState(config.skillshareRoot, preservedMetadata, preservedGitignores)) || sourceLayoutChanged;
       if (retry.code !== 0) {
         const reason = compactOutput(retry);
         await maybeNotify(config, deps, {
@@ -249,8 +271,10 @@ export async function runSkillshareSyncNotify(
     }
 
     const after = await deps.getSnapshot(config.skillshareRoot);
+    const afterConfigSnapshot = await collectSyncConfigSnapshot(config.skillshareRoot);
+    const configChanged = persistedConfigChanged || !isSameConfigSnapshot(beforeConfigSnapshot, afterConfigSnapshot);
     const changedRepos = detectChangedRepos(before, after);
-    if (changedRepos.length === 0) {
+    if (changedRepos.length === 0 && !sourceLayoutChanged && !configChanged) {
       if (auditBlocked) {
         await maybeNotify(config, deps, {
           title: 'Skillshare 同步成功（有审计警告）',
@@ -259,12 +283,13 @@ export async function runSkillshareSyncNotify(
         });
       }
       deps.log(`[${new Date().toISOString()}] skillshare-sync-notify: no updates`);
+      await writeConfigSnapshotState(config.stateFile, afterConfigSnapshot);
       return { status: 'unchanged' };
     }
 
     const sync = await deps.runCommand('skillshare', ['sync', '--all'], config.skillshareRoot);
-    await restoreMetadataFile(preservedMetadata);
-    await normalizeSkillsGitignore(config.skillshareRoot);
+    await restoreSkillshareState(config.skillshareRoot, preservedMetadata, preservedGitignores);
+    const finalConfigSnapshot = await collectSyncConfigSnapshot(config.skillshareRoot);
     if (sync.code !== 0) {
       const reason = compactOutput(sync);
       await maybeNotify(config, deps, {
@@ -274,6 +299,7 @@ export async function runSkillshareSyncNotify(
       });
       return { status: 'failed', reason };
     }
+    await writeConfigSnapshotState(config.stateFile, finalConfigSnapshot);
 
     await maybeNotify(config, deps, {
       title: auditBlocked ? 'Skillshare 同步成功（有审计警告）' : 'Skillshare 有更新',
@@ -286,8 +312,7 @@ export async function runSkillshareSyncNotify(
     );
     return { status: 'updated', changedRepos };
   } finally {
-    await restoreMetadataFile(preservedMetadata);
-    await normalizeSkillsGitignore(config.skillshareRoot);
+    await restoreSkillshareState(config.skillshareRoot, preservedMetadata, preservedGitignores);
   }
 }
 
@@ -345,6 +370,11 @@ interface TrackedMetadataFile {
   text: string;
   installs: SkillshareInstallSpec[];
   subdirSkills: SkillshareSubdirSpec[];
+}
+
+interface PreservedTextFile {
+  path: string;
+  text: string;
 }
 
 interface SkillshareInstallSpec {
@@ -448,6 +478,17 @@ async function restoreMetadataFile(metadata: TrackedMetadataFile | undefined): P
   await fs.writeFile(metadata.path, `${JSON.stringify(current, null, 2)}\n`);
 }
 
+async function restoreSkillshareState(
+  root: string,
+  metadata: TrackedMetadataFile | undefined,
+  gitignores: PreservedTextFile[]
+): Promise<boolean> {
+  await restoreMetadataFile(metadata);
+  const sourceLayoutChanged = await reconcileTrackedRepoDirs(root, metadata);
+  await restoreTextFiles(gitignores);
+  return sourceLayoutChanged;
+}
+
 async function isTrackedRepoInstalled(root: string, install: SkillshareInstallSpec): Promise<boolean> {
   try {
     await fs.access(path.join(root, 'skills', install.name, '.git'));
@@ -457,36 +498,158 @@ async function isTrackedRepoInstalled(root: string, install: SkillshareInstallSp
   }
 }
 
-async function normalizeSkillsGitignore(root: string): Promise<void> {
-  const gitignorePath = path.join(root, 'skills', '.gitignore');
-  const begin = '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT';
-  const end = '# END SKILLSHARE MANAGED';
-  let text: string;
+async function readSkillshareGitignoreFiles(root: string): Promise<PreservedTextFile[]> {
+  const files: PreservedTextFile[] = [];
+  for (const sourceDir of ['skills', 'agents']) {
+    const filePath = path.join(root, sourceDir, '.gitignore');
+    try {
+      files.push({ path: filePath, text: await fs.readFile(filePath, 'utf8') });
+    } catch {
+      // Missing gitignore files do not need preservation.
+    }
+  }
+  return files;
+}
+
+async function restoreTextFiles(files: PreservedTextFile[]): Promise<void> {
+  for (const file of files) {
+    try {
+      const current = await fs.readFile(file.path, 'utf8');
+      if (current === file.text) continue;
+    } catch {
+      // Recreate the preserved file if skillshare removed it.
+    }
+    await fs.writeFile(file.path, file.text);
+  }
+}
+
+function hashText(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+export async function collectSyncConfigSnapshot(root: string): Promise<ConfigSnapshot> {
+  const snapshot: ConfigSnapshot = {};
+  for (const relativePath of SYNC_CONFIG_RELATIVE_PATHS) {
+    try {
+      snapshot[relativePath] = hashText(await fs.readFile(path.join(root, relativePath), 'utf8'));
+    } catch {
+      snapshot[relativePath] = 'missing';
+    }
+  }
+  return snapshot;
+}
+
+function isSameConfigSnapshot(a: ConfigSnapshot, b: ConfigSnapshot): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+async function readPreviousConfigSnapshot(stateFile: string | undefined): Promise<ConfigSnapshot | undefined> {
+  if (!stateFile) return undefined;
   try {
-    text = await fs.readFile(gitignorePath, 'utf8');
+    const parsed = JSON.parse(await fs.readFile(stateFile, 'utf8')) as SkillshareSyncState | null;
+    return parsed?.configSnapshot && typeof parsed.configSnapshot === 'object'
+      ? parsed.configSnapshot
+      : undefined;
   } catch {
-    return;
+    return undefined;
+  }
+}
+
+async function writeConfigSnapshotState(stateFile: string | undefined, configSnapshot: ConfigSnapshot): Promise<void> {
+  if (!stateFile) return;
+  await fs.mkdir(path.dirname(stateFile), { recursive: true });
+  const state: SkillshareSyncState = {
+    updatedAt: new Date().toISOString(),
+    configSnapshot,
+  };
+  await fs.writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+function normalizeRepoUrl(value: string): string {
+  return value
+    .trim()
+    .replace(/^git@github\.com:/i, 'https://github.com/')
+    .replace(/^https?:\/\/github\.com\//i, 'https://github.com/')
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/g, '')
+    .toLowerCase();
+}
+
+async function readOriginUrl(repoPath: string): Promise<string | undefined> {
+  try {
+    const config = await fs.readFile(path.join(repoPath, '.git', 'config'), 'utf8');
+    const match = config.match(/^\s*url\s*=\s*(.+?)\s*$/m);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+async function isGitWorktreeClean(repoPath: string): Promise<boolean> {
+  const result = await runCommand('git', ['status', '--porcelain=v1'], repoPath);
+  return result.code === 0 && result.stdout.trim() === '';
+}
+
+async function reconcileTrackedRepoDirs(root: string, metadata: TrackedMetadataFile | undefined): Promise<boolean> {
+  if (!metadata) return false;
+
+  const skillsDir = path.join(root, 'skills');
+  const installsByName = new Map(metadata.installs.map((install) => [install.name, install]));
+  const installsByUrl = new Map(metadata.installs.map((install) => [normalizeRepoUrl(install.source), install]));
+  let changed = false;
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(skillsDir, { withFileTypes: true });
+  } catch {
+    return false;
   }
 
-  const lines = text.split(/\r?\n/);
-  const beginIndex = lines.indexOf(begin);
-  const endIndex = lines.indexOf(end);
-  if (beginIndex === -1 || endIndex === -1 || endIndex < beginIndex) return;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || installsByName.has(entry.name)) continue;
+    const repoPath = path.join(skillsDir, entry.name);
+    const originUrl = await readOriginUrl(repoPath);
+    if (!originUrl) continue;
 
-  const nextLines = [
-    ...lines.slice(0, beginIndex + 1),
-    ...lines.slice(endIndex),
-  ];
-  const nextText = nextLines.join('\n');
-  if (nextText !== text) {
-    await fs.writeFile(gitignorePath, nextText);
+    const install = installsByUrl.get(normalizeRepoUrl(originUrl));
+    if (!install) continue;
+
+    const expectedPath = path.join(skillsDir, install.name);
+    const expectedExists = await fs.access(path.join(expectedPath, '.git')).then(() => true, () => false);
+    if (!await isGitWorktreeClean(repoPath)) continue;
+
+    if (expectedExists) {
+      await fs.rm(repoPath, { recursive: true, force: true });
+      changed = true;
+    } else {
+      await fs.rename(repoPath, expectedPath);
+      changed = true;
+    }
   }
+
+  for (const install of metadata.installs) {
+    const skillPath = path.join(root, 'skills', install.name);
+    const agentPath = path.join(root, 'agents', install.name);
+    const skillExists = await fs.access(path.join(skillPath, '.git')).then(() => true, () => false);
+    if (skillExists) continue;
+
+    const agentOriginUrl = await readOriginUrl(agentPath);
+    if (!agentOriginUrl || normalizeRepoUrl(agentOriginUrl) !== normalizeRepoUrl(install.source)) continue;
+    if (!(await isGitWorktreeClean(agentPath))) continue;
+    await fs.rm(agentPath, { recursive: true, force: true });
+    changed = true;
+  }
+  return changed;
 }
 
 async function ensureTrackedReposInstalled(
   config: SkillshareSyncConfig,
   deps: SkillshareSyncDeps,
-  metadata: TrackedMetadataFile | undefined
+  metadata: TrackedMetadataFile | undefined,
+  gitignores: PreservedTextFile[]
 ): Promise<RunResult> {
   if (!metadata || metadata.installs.length === 0) {
     return { code: 0, stdout: '', stderr: '' };
@@ -496,14 +659,13 @@ async function ensureTrackedReposInstalled(
   let stderr = '';
   for (const install of metadata.installs) {
     if (await isTrackedRepoInstalled(config.skillshareRoot, install)) continue;
-    const args = ['install', install.source, '--track'];
+    const args = ['install', install.source, '--track', '--kind', 'skill'];
     if (install.branch) {
       args.push('--branch', install.branch);
     }
     args.push('--name', install.name.replace(/^_+/, ''), '--force');
     const result = await deps.runCommand('skillshare', args, config.skillshareRoot);
-    await restoreMetadataFile(metadata);
-    await normalizeSkillsGitignore(config.skillshareRoot);
+    await restoreSkillshareState(config.skillshareRoot, metadata, gitignores);
     stdout += result.stdout;
     stderr += result.stderr;
     if (result.code !== 0) {
@@ -717,6 +879,15 @@ function resolveConfigPath(env: NodeJS.ProcessEnv, cwd: string): string | undefi
   return fsSync.existsSync(fallback) ? fallback : undefined;
 }
 
+function resolveStateFile(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.SKILLSHARE_SYNC_DISABLE_STATE === '1') return undefined;
+  if (env.SKILLSHARE_SYNC_STATE_FILE) {
+    return path.resolve(env.SKILLSHARE_SYNC_STATE_FILE);
+  }
+  const stateHome = env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+  return path.join(stateHome, 'node-scripts', 'skillshare-sync-notify.json');
+}
+
 export function readConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
@@ -735,6 +906,7 @@ export function readConfigFromEnv(
 
   return {
     skillshareRoot: path.resolve(env.SKILLSHARE_ROOT || DEFAULT_SKILLSHARE_ROOT),
+    stateFile: resolveStateFile(env),
     feishu: hasFeishuConfig({ skillshareRoot: '', feishu: envFeishu }) ? envFeishu : fileFeishu,
   };
 }

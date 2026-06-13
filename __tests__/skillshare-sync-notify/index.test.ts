@@ -1,5 +1,6 @@
 import {
   collectGitSnapshot,
+  collectSyncConfigSnapshot,
   collectTrackedMetadataRoots,
   detectChangedRepos,
   readConfigFromEnv,
@@ -120,6 +121,8 @@ describe('skillshare-sync-notify', () => {
       'install',
       'https://example.com/one.git',
       '--track',
+      '--kind',
+      'skill',
       '--branch',
       'main',
       '--name',
@@ -130,6 +133,8 @@ describe('skillshare-sync-notify', () => {
       'install',
       'https://example.com/two.git',
       '--track',
+      '--kind',
+      'skill',
       '--branch',
       'develop',
       '--name',
@@ -141,6 +146,8 @@ describe('skillshare-sync-notify', () => {
       'install',
       'https://example.com/official.git',
       '--track',
+      '--kind',
+      'skill',
       '--branch',
       'main',
       '--name',
@@ -151,6 +158,8 @@ describe('skillshare-sync-notify', () => {
       'install',
       'https://example.com/official.git',
       '--track',
+      '--kind',
+      'skill',
       '--branch',
       'main',
       '--name',
@@ -189,6 +198,8 @@ describe('skillshare-sync-notify', () => {
       'install',
       'https://example.com/missing.git',
       '--track',
+      '--kind',
+      'skill',
       '--branch',
       'main',
       '--name',
@@ -197,10 +208,12 @@ describe('skillshare-sync-notify', () => {
     ], root);
   });
 
-  test('clears skillshare-managed gitignore entries after commands rewrite them', async () => {
+  test('restores skillshare gitignore files after commands rewrite them', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
     const gitignorePath = path.join(root, 'skills', '.gitignore');
+    const agentsGitignorePath = path.join(root, 'agents', '.gitignore');
     await fs.mkdir(path.join(root, 'skills', '_repo', '.git'), { recursive: true });
+    await fs.mkdir(path.join(root, 'agents'), { recursive: true });
     await fs.writeFile(path.join(root, 'skills', '.metadata.json'), JSON.stringify({
       version: 1,
       entries: {
@@ -214,6 +227,12 @@ describe('skillshare-sync-notify', () => {
       '',
       '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT',
       '_repo/',
+      '# END SKILLSHARE MANAGED',
+      '',
+    ].join('\n'));
+    await fs.writeFile(agentsGitignorePath, [
+      '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT',
+      '_agent-repo/',
       '# END SKILLSHARE MANAGED',
       '',
     ].join('\n'));
@@ -235,6 +254,13 @@ describe('skillshare-sync-notify', () => {
             '# END SKILLSHARE MANAGED',
             '',
           ].join('\n'));
+          await fs.writeFile(agentsGitignorePath, [
+            '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT',
+            '_agent-repo/',
+            '_other-agent/',
+            '# END SKILLSHARE MANAGED',
+            '',
+          ].join('\n'));
         }
         return { code: 0, stdout: '', stderr: '' };
       }),
@@ -248,9 +274,88 @@ describe('skillshare-sync-notify', () => {
       '!.metadata.json',
       '',
       '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT',
+      '_repo/',
       '# END SKILLSHARE MANAGED',
       '',
     ].join('\n'));
+    await expect(fs.readFile(agentsGitignorePath, 'utf8')).resolves.toBe([
+      '# BEGIN SKILLSHARE MANAGED - DO NOT EDIT',
+      '_agent-repo/',
+      '# END SKILLSHARE MANAGED',
+      '',
+    ].join('\n'));
+  });
+
+  test('removes duplicate generated repo dirs when metadata keeps the canonical name', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    const skillsDir = path.join(root, 'skills');
+    const canonicalDir = path.join(skillsDir, '_webperf-official');
+    const duplicateDir = path.join(skillsDir, '_nucliweb-webperf-snippets');
+    await fs.mkdir(path.join(canonicalDir, '.git'), { recursive: true });
+    await fs.mkdir(duplicateDir, { recursive: true });
+    await runGit(['init'], duplicateDir);
+    await runGit(['remote', 'add', 'origin', 'https://github.com/nucliweb/webperf-snippets.git'], duplicateDir);
+    await fs.writeFile(path.join(skillsDir, '.metadata.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        '_webperf-official': {
+          source: 'https://github.com/nucliweb/webperf-snippets.git',
+          tracked: true,
+          branch: 'main',
+        },
+      },
+    }, null, 2));
+    const deps = createDeps({
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValueOnce(snapshot([[canonicalDir, 'aaa']]))
+        .mockResolvedValueOnce(snapshot([[canonicalDir, 'aaa']])),
+    });
+
+    await runSkillshareSyncNotify({ skillshareRoot: root }, deps);
+
+    await expect(fs.access(duplicateDir)).rejects.toThrow();
+    expect(deps.runCommand).toHaveBeenCalledWith('skillshare', ['sync', '--all'], root);
+  });
+
+  test('syncs when persisted config snapshot changed since the previous run', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    const stateFile = path.join(root, 'local', 'skillshare-sync-state.json');
+    await fs.writeFile(path.join(root, 'config.yaml'), 'targets: []\n');
+    const firstDeps = createDeps({
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'aaa']]))
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'aaa']])),
+    });
+
+    await runSkillshareSyncNotify({ skillshareRoot: root, stateFile }, firstDeps);
+    await fs.writeFile(path.join(root, 'config.yaml'), 'targets:\n  - claude\n');
+
+    const secondDeps = createDeps({
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'aaa']]))
+        .mockResolvedValueOnce(snapshot([['/skills/a', 'aaa']])),
+    });
+    const result = await runSkillshareSyncNotify({ skillshareRoot: root, stateFile }, secondDeps);
+
+    expect(result.status).toBe('updated');
+    expect(secondDeps.runCommand).toHaveBeenCalledWith('skillshare', ['sync', '--all'], root);
+  });
+
+  test('collectSyncConfigSnapshot records watched config file hashes without file contents', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skillshare-sync-'));
+    await fs.mkdir(path.join(root, 'skills'), { recursive: true });
+    await fs.writeFile(path.join(root, 'config.yaml'), 'secret: value\n');
+    await fs.writeFile(path.join(root, 'skills', '.metadata.json'), '{"version":1}\n');
+
+    const snapshot = await collectSyncConfigSnapshot(root);
+
+    expect(snapshot['config.yaml']).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshot['skills/.metadata.json']).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshot['agents/.metadata.json']).toBe('missing');
+    expect(Object.values(snapshot)).not.toContain('secret: value\n');
   });
 
   test('does not sync or notify when update changes no repo heads', async () => {
@@ -426,7 +531,8 @@ describe('skillshare-sync-notify', () => {
     const result = await runSkillshareSyncNotify({ skillshareRoot: root }, deps);
     const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
 
-    expect(result.status).toBe('unchanged');
+    expect(result.status).toBe('updated');
+    expect(deps.runCommand).toHaveBeenCalledWith('skillshare', ['sync', '--all'], root);
     expect(metadata.entries.local).toEqual({ source: '/tmp/local', tracked: false });
     expect(metadata.entries.pdf.version).toBe('new');
     expect(metadata.entries.pdf.tree_hash).toBe('new-tree');
