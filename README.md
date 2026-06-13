@@ -11,6 +11,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [exec-recursive](#exec-recursive) | 递归执行命令 |
 | [claude-usage](#claude-usage) | Claude API 用量查看 |
 | [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
+| [minimax-usage](#minimax-usage) | MiniMax Token Plan 用量查看 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
 | [codex-task-runner](#codex-task-runner) | Codex 自动化任务调度 |
 | [task-loop](#task-loop) | Claude / Codex 循环任务执行 |
@@ -295,6 +296,30 @@ node dist/codex-usage/index.js --auth-file /path/to/auth.json --base-url https:/
 - **Primary / Secondary**：主、副限流窗口使用率与重置时间
 - **Credits**：额度余额信息
 - **Additional**：附加限流项
+
+---
+
+## MiniMax-Usage
+
+查看 MiniMax Token Plan 用量。默认从 `~/Documents/knowledge/local/.env` 读取 `MINIMAX_API_KEY`，并复用 `local/claude-usage-config.yaml` 的 Claude 飞书通道发送报告。
+
+### 使用方式
+
+```bash
+# 查看当前用量
+node dist/minimax-usage/index.js
+
+# JSON 输出
+node dist/minimax-usage/index.js --json
+
+# 发送一次报告到 Claude 飞书通道
+node dist/minimax-usage/index.js --notify
+
+# 轮询并发送报告（默认读取 config 里的 poll.interval_seconds）
+node dist/minimax-usage/index.js --poll
+```
+
+详细文档：[docs/minimax-usage.md](docs/minimax-usage.md)
 
 ---
 
