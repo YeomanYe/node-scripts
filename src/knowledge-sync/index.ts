@@ -172,13 +172,10 @@ async function runWatch(options: WatchOptions): Promise<void> {
     },
   });
 
-  // 启动即先收敛一次（直接执行，不走防抖）。
-  process.stdout.write(`[${timestamp()}] knowledge-sync: initial sync\n`);
-  await runSync().catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[${timestamp()}] knowledge-sync initial sync failed: ${message}\n`);
-  });
-
+  // 先装 watcher，再跑初始同步：否则「初始同步结束 → watcher 装好」之间的文件改动会丢，
+  // 直到首次兜底轮询（最多 interval 秒后）才被捕获。先装 watcher 是安全的——DebouncedRunner
+  // 串行化执行：初始同步期间到来的事件只会设置 pending/起防抖，不会启动第二次 run，
+  // 而是在初始 run 结束后合并补跑一次（coalesce），故初始同步仍恰好执行一次。
   // 1) fs.watch 即时反应（macOS 支持 recursive）。fs.watch 可能丢事件，故配 2) 兜底轮询。
   let watcher: FSWatcher | undefined;
   try {
@@ -195,6 +192,13 @@ async function runWatch(options: WatchOptions): Promise<void> {
       `[${timestamp()}] knowledge-sync: fs.watch unavailable (${message}); relying on interval poll\n`
     );
   }
+
+  // watcher 已就位，现在跑初始同步（直接执行，不走防抖）。
+  process.stdout.write(`[${timestamp()}] knowledge-sync: initial sync\n`);
+  await runSync().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[${timestamp()}] knowledge-sync initial sync failed: ${message}\n`);
+  });
 
   // 2) 兜底轮询：即便 fs 事件丢失，也定期跑一遍（Syncthing 等外部同步场景常见）。
   const pollTimer = setInterval(() => {

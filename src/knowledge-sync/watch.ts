@@ -100,9 +100,14 @@ export class DebouncedRunner {
     this.pending = false;
   }
 
-  /** 等待当前 in-flight run（如果有）收尾，用于优雅退出。 */
+  /**
+   * 等待当前 in-flight run（如果有）收尾，用于优雅退出。
+   * 调用方在 `whenIdle()` 前总会先调 `stop()`（见 runWatch shutdown）：stop 后
+   * `pending` 被清空且 `stopped` 阻止任何后续 trigger/补跑，故 in-flight run 结束后
+   * 不会再产生新的 activeRun。最多只需 await 一次，用 `if` 而非 `while`。
+   */
   async whenIdle(): Promise<void> {
-    while (this.activeRun) {
+    if (this.activeRun) {
       await this.activeRun;
     }
   }
