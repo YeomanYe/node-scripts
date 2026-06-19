@@ -1,7 +1,7 @@
-import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE, readMiniMaxApiKey } from '../minimax-usage/env';
+import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE } from '../minimax-usage/env';
 import { fetchMiniMaxQuota } from '../minimax-usage/quota';
 import { MiniMaxQuotaSnapshot } from '../minimax-usage/types';
-import { GatedRunConfig, ProviderConfig, RegisteredTask, SchedulerConfig } from './config';
+import { GatedRunConfig, ProviderConfig, RegisteredTask, SchedulerConfig, resolveProviderApiKey } from './config';
 import { evaluateMiniMaxGate, GateDecision } from './gate';
 import { runRegisteredTask, RunTaskResult } from './runner';
 
@@ -34,7 +34,8 @@ async function fetchProviderSnapshot(provider: ProviderConfig, options: {
   apiKeyEnv: string;
 }): Promise<MiniMaxQuotaSnapshot> {
   if (provider.type === 'minimax') {
-    const apiKey = await readMiniMaxApiKey({
+    // 每个 provider 用自己的 api key,缺省回退全局 loop 选项
+    const apiKey = await resolveProviderApiKey(provider, {
       envFile: options.envFile,
       apiKeyEnv: options.apiKeyEnv,
     });

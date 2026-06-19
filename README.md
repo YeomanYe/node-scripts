@@ -328,6 +328,8 @@ node dist/minimax-usage/index.js --poll
 
 根据任务绑定的 provider 当前窗口线性预算决定是否执行已注册任务。当前只实现 `minimax` provider；默认读取 `~/Documents/knowledge/local/.env` 里的 `MINIMAX_API_KEY`，默认注册配置为 `local/llm-gated-run-config.yaml`。
 
+每个 provider 可单独配置自己的 api key（不同 provider 用不同 key）：`api_key_env`（指定从 `.env`/环境变量读取的变量名，**推荐**，避免明文）、`env_file`（覆盖全局 dotenv 路径）、`api_key`（直接写明文，优先级最高，一般不建议）。三者都不配时回退全局 `--api-key-env` / `--env-file`（即 `MINIMAX_API_KEY`）。
+
 判断规则：当前已用百分比必须小于窗口已过去时间百分比才执行；如果正好相等也跳过。例如 5 小时窗口剩 2 小时、已用 60%，线性预算也是 60%，因此不会执行。
 
 ### 使用方式
@@ -372,6 +374,7 @@ providers:
     type: minimax
     model: general
     window: interval
+    api_key_env: MINIMAX_API_KEY_HEAVY   # 该 provider 用单独的 key(缺省回退全局 MINIMAX_API_KEY)
     min_headroom_percent: 20
     scheduler:
       mode: sequence
@@ -400,7 +403,7 @@ tasks:
       NODE_ENV: production
 ```
 
-任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`providers` 是 provider 注册表，`tasks.<name>.provider` 引用其中一个 provider；任务不写 `provider` 时使用 `default_provider`。`providers.<name>.tasks` 是该 provider 在 `loop` 模式下独立循环执行的任务列表，每个 provider 按自己的任务完成时间计算下一轮。`provider.type` 目前只支持 `minimax`，后续可继续在 `providers` 下扩展其它 provider。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
+任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`providers` 是 provider 注册表，`tasks.<name>.provider` 引用其中一个 provider；任务不写 `provider` 时使用 `default_provider`。`providers.<name>.tasks` 是该 provider 在 `loop` 模式下独立循环执行的任务列表，每个 provider 按自己的任务完成时间计算下一轮。`provider.type` 目前只支持 `minimax`，后续可继续在 `providers` 下扩展其它 provider。每个 provider 可用 `api_key_env` / `env_file` / `api_key` 配置各自的 api key（见上文）。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
 
 ---
 

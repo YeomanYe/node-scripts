@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { loadGatedRunConfig } from '../../src/llm-gated-run/config';
+import { loadGatedRunConfig, resolveProviderApiKey } from '../../src/llm-gated-run/config';
 
 async function writeTemp(content: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mmx-gated-cfg-'));
@@ -156,5 +156,65 @@ tasks:
     args: ["test"]
 `);
     await expect(loadGatedRunConfig(file)).rejects.toThrow(/cmd 或 command/);
+  });
+
+  test('parses per-provider api key fields (api_key / api_key_env / env_file)', async () => {
+    const file = await writeTemp(`
+providers:
+  with-env:
+    type: minimax
+    api_key_env: MINIMAX_KEY_A
+    env_file: ~/custom/.env
+  with-inline:
+    type: minimax
+    api_key: sk-plain-b
+default_provider: with-env
+tasks:
+  t:
+    cmd: echo t
+`);
+    const config = await loadGatedRunConfig(file);
+    expect(config.providers['with-env']?.apiKeyEnv).toBe('MINIMAX_KEY_A');
+    expect(config.providers['with-env']?.envFile).toBe('~/custom/.env');
+    expect(config.providers['with-inline']?.apiKey).toBe('sk-plain-b');
+  });
+});
+
+describe('resolveProviderApiKey', () => {
+  const fallback = { envFile: '/no/such/.env', apiKeyEnv: 'FALLBACK_KEY' };
+
+  test('uses inline api_key first (over env)', async () => {
+    process.env.PROVIDER_KEY = 'sk-from-env';
+    try {
+      const key = await resolveProviderApiKey(
+        { type: 'minimax', apiKey: 'sk-inline', apiKeyEnv: 'PROVIDER_KEY' } as any,
+        fallback
+      );
+      expect(key).toBe('sk-inline');
+    } finally {
+      delete process.env.PROVIDER_KEY;
+    }
+  });
+
+  test('uses provider api_key_env over global fallback', async () => {
+    process.env.PROVIDER_KEY = 'sk-from-provider-env';
+    process.env.FALLBACK_KEY = 'sk-global';
+    try {
+      const key = await resolveProviderApiKey({ type: 'minimax', apiKeyEnv: 'PROVIDER_KEY' } as any, fallback);
+      expect(key).toBe('sk-from-provider-env');
+    } finally {
+      delete process.env.PROVIDER_KEY;
+      delete process.env.FALLBACK_KEY;
+    }
+  });
+
+  test('falls back to global apiKeyEnv when provider omits key config', async () => {
+    process.env.FALLBACK_KEY = 'sk-global';
+    try {
+      const key = await resolveProviderApiKey({ type: 'minimax' } as any, fallback);
+      expect(key).toBe('sk-global');
+    } finally {
+      delete process.env.FALLBACK_KEY;
+    }
   });
 });

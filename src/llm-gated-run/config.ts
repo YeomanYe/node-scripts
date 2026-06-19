@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import YAML from 'yaml';
-import { expandHome } from '../minimax-usage/env';
+import { expandHome, readMiniMaxApiKey } from '../minimax-usage/env';
 
 export type QuotaWindowName = 'interval' | 'weekly';
 export type ProviderType = 'minimax';
@@ -23,6 +23,9 @@ export interface MiniMaxProviderConfig {
   allowOnUnknownQuota: boolean;
   scheduler?: SchedulerConfig;
   tasks: string[];
+  apiKey?: string; // 明文 api key(优先级最高;一般建议改用 apiKeyEnv 避免明文)
+  apiKeyEnv?: string; // 从 .env/环境变量读取的变量名,覆盖全局 --api-key-env
+  envFile?: string; // dotenv 文件路径,覆盖全局 --env-file
 }
 
 export type ProviderConfig = MiniMaxProviderConfig;
@@ -214,6 +217,20 @@ function normalizeScheduler(raw: unknown, label: string): SchedulerConfig | unde
   };
 }
 
+function readProviderKeyFields(
+  primary: Record<string, unknown>,
+  fallback: Record<string, unknown>,
+  label: string
+): { apiKey?: string; apiKeyEnv?: string; envFile?: string } {
+  const pick = (snake: string, camel: string): unknown =>
+    primary[snake] ?? primary[camel] ?? fallback[snake] ?? fallback[camel];
+  return {
+    apiKey: optionalString(pick('api_key', 'apiKey'), `${label}.api_key`),
+    apiKeyEnv: optionalString(pick('api_key_env', 'apiKeyEnv'), `${label}.api_key_env`),
+    envFile: optionalString(pick('env_file', 'envFile'), `${label}.env_file`),
+  };
+}
+
 function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: string): ProviderConfig {
   if (raw === undefined || raw === null || typeof raw === 'string') {
     return {
@@ -224,6 +241,7 @@ function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: s
       allowOnUnknownQuota: readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
       scheduler: normalizeScheduler(root['scheduler'], `${label}.scheduler`),
       tasks: normalizeStringList(root['provider_tasks'] ?? root['providerTasks'], `${label}.tasks`),
+      ...readProviderKeyFields(root, root, label),
     };
   }
 
@@ -243,6 +261,7 @@ function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: s
         : readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
     scheduler: normalizeScheduler(obj['scheduler'], `${label}.scheduler`),
     tasks: normalizeStringList(obj['tasks'], `${label}.tasks`),
+    ...readProviderKeyFields(obj, root, label),
   };
 }
 
@@ -327,4 +346,23 @@ export async function loadGatedRunConfig(filePath: string): Promise<GatedRunConf
   };
   validateTaskProviders(result);
   return result;
+}
+
+/**
+ * 解析某 provider 实际使用的 api key:
+ * 1) provider.apiKey 明文(优先级最高);
+ * 2) 否则从 (provider.envFile ?? 全局 envFile) 里读 (provider.apiKeyEnv ?? 全局 apiKeyEnv) 变量。
+ * 让不同 provider 各用各的 key(不同变量名/不同 .env/明文)。
+ */
+export async function resolveProviderApiKey(
+  provider: ProviderConfig,
+  fallback: { envFile: string; apiKeyEnv: string }
+): Promise<string> {
+  if (provider.apiKey && provider.apiKey.trim().length > 0) {
+    return provider.apiKey.trim();
+  }
+  return readMiniMaxApiKey({
+    envFile: provider.envFile ?? fallback.envFile,
+    apiKeyEnv: provider.apiKeyEnv ?? fallback.apiKeyEnv,
+  });
 }

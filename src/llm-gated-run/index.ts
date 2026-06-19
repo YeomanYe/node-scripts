@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE, readMiniMaxApiKey } from '../minimax-usage/env';
+import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE } from '../minimax-usage/env';
 import { fetchMiniMaxQuota } from '../minimax-usage/quota';
 import { MiniMaxQuotaSnapshot } from '../minimax-usage/types';
-import { DEFAULT_CONFIG_PATH, GatedRunConfig, loadGatedRunConfig, ProviderConfig, RegisteredTask } from './config';
+import { DEFAULT_CONFIG_PATH, GatedRunConfig, loadGatedRunConfig, ProviderConfig, RegisteredTask, resolveProviderApiKey } from './config';
 import { evaluateMiniMaxGate, GateDecision } from './gate';
 import { runProviderLoops } from './loop';
 import { runRegisteredTask } from './runner';
@@ -32,17 +32,14 @@ function setupSignalHandlers(): void {
   process.on('SIGINT', cleanup);
 }
 
-async function getSnapshot(options: BaseOptions): Promise<MiniMaxQuotaSnapshot> {
-  const apiKey = await readMiniMaxApiKey({
-    envFile: options.envFile,
-    apiKeyEnv: options.apiKeyEnv,
-  });
-  return fetchMiniMaxQuota({ apiKey });
-}
-
 async function getProviderSnapshot(provider: ProviderConfig, options: BaseOptions): Promise<MiniMaxQuotaSnapshot> {
   if (provider.type === 'minimax') {
-    return getSnapshot(options);
+    // 每个 provider 用自己的 api key(provider.apiKey/apiKeyEnv/envFile),缺省回退全局 CLI 选项
+    const apiKey = await resolveProviderApiKey(provider, {
+      envFile: options.envFile,
+      apiKeyEnv: options.apiKeyEnv,
+    });
+    return fetchMiniMaxQuota({ apiKey });
   }
   throw new Error(`未知 provider: ${(provider as { type: string }).type}`);
 }
