@@ -1,4 +1,4 @@
-import { evaluateMiniMaxGate } from '../../src/minimax-gated-run/gate';
+import { evaluateMiniMaxGate } from '../../src/llm-gated-run/gate';
 import { MiniMaxQuotaSnapshot } from '../../src/minimax-usage/types';
 
 function makeSnapshot(usedPercent: number): MiniMaxQuotaSnapshot {
@@ -32,7 +32,7 @@ function makeSnapshot(usedPercent: number): MiniMaxQuotaSnapshot {
   };
 }
 
-describe('minimax-gated-run gate', () => {
+describe('llm-gated-run gate', () => {
   const nowMs = 1_000 + 3 * 60 * 60 * 1000;
 
   test('skips when usage equals the linear budget', () => {

@@ -47,7 +47,7 @@ export interface GatedRunConfig {
   tasks: Record<string, RegisteredTask>;
 }
 
-export const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/minimax-gated-run-config.yaml');
+export const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/llm-gated-run-config.yaml');
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

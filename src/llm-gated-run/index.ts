@@ -88,7 +88,7 @@ function printDecision(provider: ResolvedProvider, decision: GateDecision, json?
   }
   const model = decision.modelName ? ` model=${decision.modelName}` : '';
   process.stdout.write(
-    `[minimax-gated-run] provider=${provider.id} type=${provider.config.type}${model} window=${decision.window} ${decision.reason}\n`
+    `[llm-gated-run] provider=${provider.id} type=${provider.config.type}${model} window=${decision.window} ${decision.reason}\n`
   );
 }
 
@@ -130,7 +130,7 @@ async function runTask(name: string, options: RunOptions): Promise<void> {
 async function loopTasks(options: BaseOptions): Promise<void> {
   const config = await loadGatedRunConfig(options.config);
   process.stdout.write(
-    `[${new Date().toISOString()}] minimax-gated-run loop started (providers=${Object.keys(config.providers).length})\n`
+    `[${new Date().toISOString()}] llm-gated-run loop started (providers=${Object.keys(config.providers).length})\n`
   );
   await runProviderLoops({
     config,
@@ -150,8 +150,8 @@ function addBaseOptions(command: Command): Command {
 export function createProgram(): Command {
   const program = new Command();
   program
-    .name('minimax-gated-run')
-    .description('Run registered tasks only when MiniMax linear window quota has enough headroom');
+    .name('llm-gated-run')
+    .description('Run registered tasks only when the LLM provider linear window quota has enough headroom');
 
   addBaseOptions(program.command('list').description('list registered tasks'))
     .action((options: BaseOptions) => listTasks(options));

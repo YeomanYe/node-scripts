@@ -12,7 +12,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [claude-usage](#claude-usage) | Claude API 用量查看 |
 | [codex-usage](#codex-usage) | Codex / ChatGPT 用量查看 |
 | [minimax-usage](#minimax-usage) | MiniMax Token Plan 用量查看 |
-| [minimax-gated-run](#minimax-gated-run) | 根据 MiniMax 线性窗口额度执行已注册任务 |
+| [llm-gated-run](#llm-gated-run) | 根据 MiniMax 线性窗口额度执行已注册任务 |
 | [claude-task-runner](#claude-task-runner) | Claude 自动化任务调度 |
 | [codex-task-runner](#codex-task-runner) | Codex 自动化任务调度 |
 | [task-loop](#task-loop) | Claude / Codex 循环任务执行 |
@@ -324,9 +324,9 @@ node dist/minimax-usage/index.js --poll
 
 ---
 
-## MiniMax-Gated-Run
+## LLM-Gated-Run
 
-根据任务绑定的 provider 当前窗口线性预算决定是否执行已注册任务。当前只实现 `minimax` provider；默认读取 `~/Documents/knowledge/local/.env` 里的 `MINIMAX_API_KEY`，默认注册配置为 `local/minimax-gated-run-config.yaml`。
+根据任务绑定的 provider 当前窗口线性预算决定是否执行已注册任务。当前只实现 `minimax` provider；默认读取 `~/Documents/knowledge/local/.env` 里的 `MINIMAX_API_KEY`，默认注册配置为 `local/llm-gated-run-config.yaml`。
 
 判断规则：当前已用百分比必须小于窗口已过去时间百分比才执行；如果正好相等也跳过。例如 5 小时窗口剩 2 小时、已用 60%，线性预算也是 60%，因此不会执行。
 
@@ -334,19 +334,19 @@ node dist/minimax-usage/index.js --poll
 
 ```bash
 # 列出已注册任务
-node dist/minimax-gated-run/index.js list
+node dist/llm-gated-run/index.js list
 
 # 只检查是否会执行，不真正运行任务
-node dist/minimax-gated-run/index.js check nightly
+node dist/llm-gated-run/index.js check nightly
 
 # 额度允许时执行任务，跳过时默认返回 0，适合 cron/pm2
-node dist/minimax-gated-run/index.js run nightly
+node dist/llm-gated-run/index.js run nightly
 
 # 跳过时返回配置里的 skip_exit_code
-node dist/minimax-gated-run/index.js run nightly --fail-on-skip
+node dist/llm-gated-run/index.js run nightly --fail-on-skip
 
 # 按 provider 独立循环执行
-node dist/minimax-gated-run/index.js loop
+node dist/llm-gated-run/index.js loop
 ```
 
 ### 注册配置示例

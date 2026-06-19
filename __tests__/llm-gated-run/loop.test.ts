@@ -1,5 +1,5 @@
-import { GatedRunConfig, ProviderConfig, RegisteredTask } from '../../src/minimax-gated-run/config';
-import { runProviderLoop } from '../../src/minimax-gated-run/loop';
+import { GatedRunConfig, ProviderConfig, RegisteredTask } from '../../src/llm-gated-run/config';
+import { runProviderLoop } from '../../src/llm-gated-run/loop';
 import { MiniMaxQuotaSnapshot } from '../../src/minimax-usage/types';
 
 function makeSnapshot(): MiniMaxQuotaSnapshot {
@@ -34,7 +34,7 @@ function makeSnapshot(): MiniMaxQuotaSnapshot {
   };
 }
 
-describe('minimax-gated-run loop', () => {
+describe('llm-gated-run loop', () => {
   test('runs tasks from the provider task list', async () => {
     const provider: ProviderConfig = {
       type: 'minimax',

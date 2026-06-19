@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { loadGatedRunConfig } from '../../src/minimax-gated-run/config';
+import { loadGatedRunConfig } from '../../src/llm-gated-run/config';
 
 async function writeTemp(content: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mmx-gated-cfg-'));
@@ -10,7 +10,7 @@ async function writeTemp(content: string): Promise<string> {
   return file;
 }
 
-describe('minimax-gated-run config', () => {
+describe('llm-gated-run config', () => {
   test('loads registered tasks', async () => {
     const file = await writeTemp(`
 providers:
