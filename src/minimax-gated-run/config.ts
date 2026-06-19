@@ -5,6 +5,15 @@ import { expandHome } from '../minimax-usage/env';
 
 export type QuotaWindowName = 'interval' | 'weekly';
 export type ProviderType = 'minimax';
+export type SchedulerMode = 'sequence';
+
+export interface SchedulerConfig {
+  mode: SchedulerMode;
+  runImmediately: boolean;
+  intervalSeconds: number;
+  jitterSeconds: number;
+  stopOnError: boolean;
+}
 
 export interface MiniMaxProviderConfig {
   type: 'minimax';
@@ -12,6 +21,8 @@ export interface MiniMaxProviderConfig {
   window: QuotaWindowName;
   minHeadroomPercent: number;
   allowOnUnknownQuota: boolean;
+  scheduler?: SchedulerConfig;
+  tasks: string[];
 }
 
 export type ProviderConfig = MiniMaxProviderConfig;
@@ -67,10 +78,27 @@ function booleanWithDefault(value: unknown, fallback: boolean, label: string): b
   return value;
 }
 
+function positiveNumberWithDefault(value: unknown, fallback: number, label: string): number {
+  const number = numberWithDefault(value, fallback, label);
+  if (number <= 0) throw new Error(`${label} 必须大于 0`);
+  return number;
+}
+
+function nonNegativeNumberWithDefault(value: unknown, fallback: number, label: string): number {
+  const number = numberWithDefault(value, fallback, label);
+  if (number < 0) throw new Error(`${label} 必须大于等于 0`);
+  return number;
+}
+
 function normalizeWindow(value: unknown, fallback: QuotaWindowName, label: string): QuotaWindowName {
   if (value === undefined || value === null) return fallback;
   if (value === 'interval' || value === 'weekly') return value;
   throw new Error(`${label} 必须是 interval 或 weekly`);
+}
+
+function normalizeSchedulerMode(value: unknown, label: string): SchedulerMode {
+  if (value === undefined || value === null || value === 'sequence') return 'sequence';
+  throw new Error(`${label} 目前只支持 sequence`);
 }
 
 function optionalWindow(value: unknown, label: string): QuotaWindowName | undefined {
@@ -84,6 +112,14 @@ function normalizeArgs(value: unknown, label: string): string[] {
     throw new Error(`${label} 必须是字符串数组`);
   }
   return [...value];
+}
+
+function normalizeStringList(value: unknown, label: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim().length === 0)) {
+    throw new Error(`${label} 必须是非空字符串数组`);
+  }
+  return value.map((item) => item.trim());
 }
 
 function normalizeEnv(value: unknown, label: string): Record<string, string> {
@@ -154,6 +190,30 @@ function readBooleanAlias(obj: Record<string, unknown>, snake: string, camel: st
   return booleanWithDefault(obj[camel], fallback, `${label}.${camel}`);
 }
 
+function normalizeScheduler(raw: unknown, label: string): SchedulerConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = requireObject(raw, label);
+  return {
+    mode: normalizeSchedulerMode(obj['mode'], `${label}.mode`),
+    runImmediately:
+      obj['run_immediately'] !== undefined
+        ? booleanWithDefault(obj['run_immediately'], true, `${label}.run_immediately`)
+        : booleanWithDefault(obj['runImmediately'], true, `${label}.runImmediately`),
+    intervalSeconds:
+      obj['interval_seconds'] !== undefined
+        ? positiveNumberWithDefault(obj['interval_seconds'], 900, `${label}.interval_seconds`)
+        : positiveNumberWithDefault(obj['intervalSeconds'], 900, `${label}.intervalSeconds`),
+    jitterSeconds:
+      obj['jitter_seconds'] !== undefined
+        ? nonNegativeNumberWithDefault(obj['jitter_seconds'], 0, `${label}.jitter_seconds`)
+        : nonNegativeNumberWithDefault(obj['jitterSeconds'], 0, `${label}.jitterSeconds`),
+    stopOnError:
+      obj['stop_on_error'] !== undefined
+        ? booleanWithDefault(obj['stop_on_error'], false, `${label}.stop_on_error`)
+        : booleanWithDefault(obj['stopOnError'], false, `${label}.stopOnError`),
+  };
+}
+
 function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: string): ProviderConfig {
   if (raw === undefined || raw === null || typeof raw === 'string') {
     return {
@@ -162,6 +222,8 @@ function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: s
       window: normalizeWindow(root['window'], 'interval', `${label}.window`),
       minHeadroomPercent: readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, label),
       allowOnUnknownQuota: readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
+      scheduler: normalizeScheduler(root['scheduler'], `${label}.scheduler`),
+      tasks: normalizeStringList(root['provider_tasks'] ?? root['providerTasks'], `${label}.tasks`),
     };
   }
 
@@ -179,6 +241,8 @@ function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: s
       obj['allow_on_unknown_quota'] !== undefined || obj['allowOnUnknownQuota'] !== undefined
         ? readBooleanAlias(obj, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label)
         : readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
+    scheduler: normalizeScheduler(obj['scheduler'], `${label}.scheduler`),
+    tasks: normalizeStringList(obj['tasks'], `${label}.tasks`),
   };
 }
 
@@ -227,6 +291,13 @@ function validateTaskProviders(config: {
   for (const [name, task] of Object.entries(config.tasks)) {
     if (task.provider && !config.providers[task.provider]) {
       throw new Error(`tasks.${name}.provider 未注册: ${task.provider}`);
+    }
+  }
+  for (const [providerName, provider] of Object.entries(config.providers)) {
+    for (const taskName of provider.tasks) {
+      if (!config.tasks[taskName]) {
+        throw new Error(`providers.${providerName}.tasks 引用了未注册任务: ${taskName}`);
+      }
     }
   }
 }

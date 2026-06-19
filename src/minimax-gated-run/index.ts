@@ -6,6 +6,7 @@ import { fetchMiniMaxQuota } from '../minimax-usage/quota';
 import { MiniMaxQuotaSnapshot } from '../minimax-usage/types';
 import { DEFAULT_CONFIG_PATH, GatedRunConfig, loadGatedRunConfig, ProviderConfig, RegisteredTask } from './config';
 import { evaluateMiniMaxGate, GateDecision } from './gate';
+import { runProviderLoops } from './loop';
 import { runRegisteredTask } from './runner';
 
 interface BaseOptions {
@@ -17,6 +18,18 @@ interface BaseOptions {
 interface RunOptions extends BaseOptions {
   json?: boolean;
   failOnSkip?: boolean;
+}
+
+const stopSignal = { stopped: false };
+
+function setupSignalHandlers(): void {
+  const cleanup = () => {
+    if (stopSignal.stopped) return;
+    stopSignal.stopped = true;
+    process.stdout.write('\n');
+  };
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
 }
 
 async function getSnapshot(options: BaseOptions): Promise<MiniMaxQuotaSnapshot> {
@@ -114,6 +127,19 @@ async function runTask(name: string, options: RunOptions): Promise<void> {
   process.exitCode = result.code;
 }
 
+async function loopTasks(options: BaseOptions): Promise<void> {
+  const config = await loadGatedRunConfig(options.config);
+  process.stdout.write(
+    `[${new Date().toISOString()}] minimax-gated-run loop started (providers=${Object.keys(config.providers).length})\n`
+  );
+  await runProviderLoops({
+    config,
+    envFile: options.envFile,
+    apiKeyEnv: options.apiKeyEnv,
+    signal: stopSignal,
+  });
+}
+
 function addBaseOptions(command: Command): Command {
   return command
     .option('-c, --config <path>', 'registered task config path', DEFAULT_CONFIG_PATH)
@@ -140,10 +166,14 @@ export function createProgram(): Command {
     .option('--fail-on-skip', 'return skip_exit_code when quota gate blocks the task')
     .action((task: string, options: RunOptions) => runTask(task, options));
 
+  addBaseOptions(program.command('loop').description('run independent provider loops from config'))
+    .action((options: BaseOptions) => loopTasks(options));
+
   return program;
 }
 
 if (require.main === module) {
+  setupSignalHandlers();
   createProgram().parseAsync(process.argv).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${message}\n`);

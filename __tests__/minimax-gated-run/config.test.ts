@@ -52,10 +52,22 @@ providers:
     type: minimax
     model: general
     min_headroom_percent: 0
+    scheduler:
+      interval_seconds: 900
+      run_immediately: true
+      jitter_seconds: 30
+    tasks:
+      - a
   heavy:
     type: minimax
     model: video
     min_headroom_percent: 20
+    scheduler:
+      interval_seconds: 1800
+      run_immediately: false
+      stop_on_error: true
+    tasks:
+      - b
 default_provider: light
 tasks:
   a:
@@ -70,6 +82,10 @@ tasks:
     expect(config.tasks.a?.provider).toBeUndefined();
     expect(config.tasks.b?.provider).toBe('heavy');
     expect(config.providers.heavy?.minHeadroomPercent).toBe(20);
+    expect(config.providers.light?.tasks).toEqual(['a']);
+    expect(config.providers.light?.scheduler?.jitterSeconds).toBe(30);
+    expect(config.providers.heavy?.tasks).toEqual(['b']);
+    expect(config.providers.heavy?.scheduler?.stopOnError).toBe(true);
   });
 
   test('keeps legacy top-level MiniMax provider fields compatible', async () => {
@@ -116,6 +132,21 @@ tasks:
 `);
 
     await expect(loadGatedRunConfig(file)).rejects.toThrow(/tasks\.nightly\.provider 未注册/);
+  });
+
+  test('rejects provider loop task that is not registered', async () => {
+    const file = await writeTemp(`
+providers:
+  light:
+    type: minimax
+    tasks:
+      - missing
+tasks:
+  nightly:
+    cmd: pnpm test
+`);
+
+    await expect(loadGatedRunConfig(file)).rejects.toThrow(/providers\.light\.tasks 引用了未注册任务/);
   });
 
   test('rejects unregistered command shape', async () => {

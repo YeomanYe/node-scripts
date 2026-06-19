@@ -344,6 +344,9 @@ node dist/minimax-gated-run/index.js run nightly
 
 # 跳过时返回配置里的 skip_exit_code
 node dist/minimax-gated-run/index.js run nightly --fail-on-skip
+
+# 按 provider 独立循环执行
+node dist/minimax-gated-run/index.js loop
 ```
 
 ### 注册配置示例
@@ -356,12 +359,28 @@ providers:
     window: interval
     min_headroom_percent: 0
     allow_on_unknown_quota: false
+    scheduler:
+      mode: sequence
+      run_immediately: true
+      interval_seconds: 900
+      jitter_seconds: 30
+      stop_on_error: false
+    tasks:
+      - nightly
 
   minimax-heavy:
     type: minimax
     model: general
     window: interval
     min_headroom_percent: 20
+    scheduler:
+      mode: sequence
+      run_immediately: false
+      interval_seconds: 1800
+      jitter_seconds: 60
+      stop_on_error: true
+    tasks:
+      - report
 
 default_provider: minimax-general
 skip_exit_code: 75
@@ -381,7 +400,7 @@ tasks:
       NODE_ENV: production
 ```
 
-任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`providers` 是 provider 注册表，`tasks.<name>.provider` 引用其中一个 provider；任务不写 `provider` 时使用 `default_provider`。`provider.type` 目前只支持 `minimax`，后续可继续在 `providers` 下扩展其它 provider。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
+任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`providers` 是 provider 注册表，`tasks.<name>.provider` 引用其中一个 provider；任务不写 `provider` 时使用 `default_provider`。`providers.<name>.tasks` 是该 provider 在 `loop` 模式下独立循环执行的任务列表，每个 provider 按自己的任务完成时间计算下一轮。`provider.type` 目前只支持 `minimax`，后续可继续在 `providers` 下扩展其它 provider。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
 
 ---
 
