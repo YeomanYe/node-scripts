@@ -13,6 +13,7 @@
     "claude-task-loop": "dist/claude-task-loop/index.js",
     "codex-usage": "dist/codex-usage/index.js",
     "minimax-usage": "dist/minimax-usage/index.js",
+    "minimax-gated-run": "dist/minimax-gated-run/index.js",
     "codex-task-runner": "dist/codex-task-runner/index.js",
     "codex-task-loop": "dist/codex-task-loop/index.js",
     "git-pull-poll": "dist/git-pull-poll/index.js",
