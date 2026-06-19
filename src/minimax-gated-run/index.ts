@@ -43,26 +43,40 @@ function resolveTask(config: GatedRunConfig, name: string): RegisteredTask {
   return task;
 }
 
-function evaluateTask(config: GatedRunConfig, task: RegisteredTask, snapshot: MiniMaxQuotaSnapshot): GateDecision {
-  if (config.provider.type === 'minimax') {
-    return evaluateMiniMaxGate({
-      snapshot,
-      model: task.model ?? config.provider.model,
-      window: task.window ?? config.provider.window,
-      minHeadroomPercent: task.minHeadroomPercent ?? config.provider.minHeadroomPercent,
-      allowOnUnknownQuota: config.provider.allowOnUnknownQuota,
-    });
-  }
-  throw new Error(`未知 provider: ${(config.provider as { type: string }).type}`);
+interface ResolvedProvider {
+  id: string;
+  config: ProviderConfig;
 }
 
-function printDecision(provider: ProviderConfig, decision: GateDecision, json?: boolean): void {
+function resolveProvider(config: GatedRunConfig, task: RegisteredTask): ResolvedProvider {
+  const id = task.provider ?? config.defaultProvider;
+  const provider = config.providers[id];
+  if (!provider) throw new Error(`任务引用了未注册 provider: ${id}`);
+  return { id, config: provider };
+}
+
+function evaluateTask(provider: ProviderConfig, task: RegisteredTask, snapshot: MiniMaxQuotaSnapshot): GateDecision {
+  if (provider.type === 'minimax') {
+    return evaluateMiniMaxGate({
+      snapshot,
+      model: task.model ?? provider.model,
+      window: task.window ?? provider.window,
+      minHeadroomPercent: task.minHeadroomPercent ?? provider.minHeadroomPercent,
+      allowOnUnknownQuota: provider.allowOnUnknownQuota,
+    });
+  }
+  throw new Error(`未知 provider: ${(provider as { type: string }).type}`);
+}
+
+function printDecision(provider: ResolvedProvider, decision: GateDecision, json?: boolean): void {
   if (json) {
-    process.stdout.write(JSON.stringify({ provider: provider.type, ...decision }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ provider: provider.id, providerType: provider.config.type, ...decision }, null, 2) + '\n');
     return;
   }
   const model = decision.modelName ? ` model=${decision.modelName}` : '';
-  process.stdout.write(`[minimax-gated-run] provider=${provider.type}${model} window=${decision.window} ${decision.reason}\n`);
+  process.stdout.write(
+    `[minimax-gated-run] provider=${provider.id} type=${provider.config.type}${model} window=${decision.window} ${decision.reason}\n`
+  );
 }
 
 async function listTasks(options: BaseOptions): Promise<void> {
@@ -73,10 +87,11 @@ async function listTasks(options: BaseOptions): Promise<void> {
 
 async function checkTask(name: string, options: RunOptions): Promise<void> {
   const config = await loadGatedRunConfig(options.config);
-  const snapshot = await getProviderSnapshot(config.provider, options);
   const task = resolveTask(config, name);
-  const decision = evaluateTask(config, task, snapshot);
-  printDecision(config.provider, decision, options.json);
+  const provider = resolveProvider(config, task);
+  const snapshot = await getProviderSnapshot(provider.config, options);
+  const decision = evaluateTask(provider.config, task, snapshot);
+  printDecision(provider, decision, options.json);
   if (!decision.allowed && options.failOnSkip) {
     process.exitCode = config.skipExitCode || 75;
   }
@@ -84,10 +99,11 @@ async function checkTask(name: string, options: RunOptions): Promise<void> {
 
 async function runTask(name: string, options: RunOptions): Promise<void> {
   const config = await loadGatedRunConfig(options.config);
-  const snapshot = await getProviderSnapshot(config.provider, options);
   const task = resolveTask(config, name);
-  const decision = evaluateTask(config, task, snapshot);
-  printDecision(config.provider, decision, options.json);
+  const provider = resolveProvider(config, task);
+  const snapshot = await getProviderSnapshot(provider.config, options);
+  const decision = evaluateTask(provider.config, task, snapshot);
+  printDecision(provider, decision, options.json);
 
   if (!decision.allowed) {
     process.exitCode = options.failOnSkip ? config.skipExitCode || 75 : 0;

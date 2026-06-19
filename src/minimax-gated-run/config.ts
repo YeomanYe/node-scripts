@@ -17,6 +17,7 @@ export interface MiniMaxProviderConfig {
 export type ProviderConfig = MiniMaxProviderConfig;
 
 export interface RegisteredTask {
+  provider?: string;
   cmd?: string;
   command?: string;
   args: string[];
@@ -29,7 +30,8 @@ export interface RegisteredTask {
 }
 
 export interface GatedRunConfig {
-  provider: ProviderConfig;
+  providers: Record<string, ProviderConfig>;
+  defaultProvider: string;
   skipExitCode: number;
   tasks: Record<string, RegisteredTask>;
 }
@@ -107,6 +109,7 @@ function normalizeTask(name: string, raw: unknown): RegisteredTask {
   }
 
   return {
+    provider: optionalString(obj['provider'], `tasks.${name}.provider`),
     cmd,
     command,
     args: normalizeArgs(obj['args'], `tasks.${name}.args`),
@@ -151,32 +154,81 @@ function readBooleanAlias(obj: Record<string, unknown>, snake: string, camel: st
   return booleanWithDefault(obj[camel], fallback, `${label}.${camel}`);
 }
 
-function normalizeProvider(raw: unknown, root: Record<string, unknown>): ProviderConfig {
+function normalizeProvider(raw: unknown, root: Record<string, unknown>, label: string): ProviderConfig {
   if (raw === undefined || raw === null || typeof raw === 'string') {
     return {
-      type: normalizeProviderType(raw, 'provider'),
-      model: optionalString(root['model'], 'model'),
-      window: normalizeWindow(root['window'], 'interval', 'window'),
-      minHeadroomPercent: readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, '配置文件'),
-      allowOnUnknownQuota: readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, '配置文件'),
+      type: normalizeProviderType(raw, label),
+      model: optionalString(root['model'], `${label}.model`),
+      window: normalizeWindow(root['window'], 'interval', `${label}.window`),
+      minHeadroomPercent: readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, label),
+      allowOnUnknownQuota: readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
     };
   }
 
-  const obj = requireObject(raw, 'provider');
-  const type = normalizeProviderType(obj['type'], 'provider.type');
+  const obj = requireObject(raw, label);
+  const type = normalizeProviderType(obj['type'], `${label}.type`);
   return {
     type,
-    model: optionalString(obj['model'] ?? root['model'], 'provider.model'),
-    window: normalizeWindow(obj['window'] ?? root['window'], 'interval', 'provider.window'),
+    model: optionalString(obj['model'] ?? root['model'], `${label}.model`),
+    window: normalizeWindow(obj['window'] ?? root['window'], 'interval', `${label}.window`),
     minHeadroomPercent:
       obj['min_headroom_percent'] !== undefined || obj['minHeadroomPercent'] !== undefined
-        ? readNumberAlias(obj, 'min_headroom_percent', 'minHeadroomPercent', 0, 'provider')
-        : readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, '配置文件'),
+        ? readNumberAlias(obj, 'min_headroom_percent', 'minHeadroomPercent', 0, label)
+        : readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, label),
     allowOnUnknownQuota:
       obj['allow_on_unknown_quota'] !== undefined || obj['allowOnUnknownQuota'] !== undefined
-        ? readBooleanAlias(obj, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, 'provider')
-        : readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, '配置文件'),
+        ? readBooleanAlias(obj, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label)
+        : readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, label),
   };
+}
+
+function normalizeProviderName(name: string, label: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    throw new Error(`${label} 名称无效: ${name}`);
+  }
+  return name;
+}
+
+function normalizeProviders(root: Record<string, unknown>): {
+  providers: Record<string, ProviderConfig>;
+  defaultProvider: string;
+} {
+  if (root['providers'] !== undefined) {
+    const rawProviders = requireObject(root['providers'], 'providers');
+    const providers: Record<string, ProviderConfig> = {};
+    for (const [name, raw] of Object.entries(rawProviders)) {
+      const normalizedName = normalizeProviderName(name, 'provider');
+      providers[normalizedName] = normalizeProvider(raw, {}, `providers.${normalizedName}`);
+    }
+
+    const names = Object.keys(providers);
+    if (names.length === 0) throw new Error('providers 至少需要配置一个 provider');
+
+    const defaultProvider =
+      optionalString(root['default_provider'] ?? root['defaultProvider'], 'default_provider') ?? names[0]!;
+    if (!providers[defaultProvider]) {
+      throw new Error(`default_provider 未注册: ${defaultProvider}`);
+    }
+    return { providers, defaultProvider };
+  }
+
+  return {
+    providers: {
+      default: normalizeProvider(root['provider'], root, 'provider'),
+    },
+    defaultProvider: 'default',
+  };
+}
+
+function validateTaskProviders(config: {
+  providers: Record<string, ProviderConfig>;
+  tasks: Record<string, RegisteredTask>;
+}): void {
+  for (const [name, task] of Object.entries(config.tasks)) {
+    if (task.provider && !config.providers[task.provider]) {
+      throw new Error(`tasks.${name}.provider 未注册: ${task.provider}`);
+    }
+  }
 }
 
 export async function loadGatedRunConfig(filePath: string): Promise<GatedRunConfig> {
@@ -193,12 +245,15 @@ export async function loadGatedRunConfig(filePath: string): Promise<GatedRunConf
 
   const parsed: unknown = YAML.parse(content) ?? {};
   const obj = requireObject(parsed, '配置文件');
-  return {
-    provider: normalizeProvider(obj['provider'], obj),
+  const providerConfig = normalizeProviders(obj);
+  const result: GatedRunConfig = {
+    ...providerConfig,
     skipExitCode:
       obj['skip_exit_code'] !== undefined
         ? numberWithDefault(obj['skip_exit_code'], 0, 'skip_exit_code')
         : numberWithDefault(obj['skipExitCode'], 0, 'skipExitCode'),
     tasks: normalizeTasks(obj['tasks']),
   };
+  validateTaskProviders(result);
+  return result;
 }

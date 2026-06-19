@@ -13,13 +13,16 @@ async function writeTemp(content: string): Promise<string> {
 describe('minimax-gated-run config', () => {
   test('loads registered tasks', async () => {
     const file = await writeTemp(`
-provider:
-  type: minimax
-  model: general
-  window: interval
-  min_headroom_percent: 2
+providers:
+  minimax-general:
+    type: minimax
+    model: general
+    window: interval
+    min_headroom_percent: 2
+default_provider: minimax-general
 tasks:
   nightly:
+    provider: minimax-general
     cmd: pnpm test
     cwd: /tmp
   report:
@@ -30,14 +33,43 @@ tasks:
 `);
 
     const config = await loadGatedRunConfig(file);
-    expect(config.provider.type).toBe('minimax');
-    expect(config.provider.model).toBe('general');
-    expect(config.provider.minHeadroomPercent).toBe(2);
+    expect(config.defaultProvider).toBe('minimax-general');
+    expect(config.providers['minimax-general']?.type).toBe('minimax');
+    expect(config.providers['minimax-general']?.model).toBe('general');
+    expect(config.providers['minimax-general']?.minHeadroomPercent).toBe(2);
+    expect(config.tasks.nightly?.provider).toBe('minimax-general');
     expect(config.tasks.nightly?.cmd).toBe('pnpm test');
     expect(config.tasks.nightly?.shell).toBe(true);
     expect(config.tasks.report?.command).toBe('node');
     expect(config.tasks.report?.args).toEqual(['scripts/report.js']);
     expect(config.tasks.report?.env.NODE_ENV).toBe('test');
+  });
+
+  test('lets tasks select different registered providers', async () => {
+    const file = await writeTemp(`
+providers:
+  light:
+    type: minimax
+    model: general
+    min_headroom_percent: 0
+  heavy:
+    type: minimax
+    model: video
+    min_headroom_percent: 20
+default_provider: light
+tasks:
+  a:
+    cmd: echo a
+  b:
+    provider: heavy
+    cmd: echo b
+`);
+
+    const config = await loadGatedRunConfig(file);
+    expect(config.defaultProvider).toBe('light');
+    expect(config.tasks.a?.provider).toBeUndefined();
+    expect(config.tasks.b?.provider).toBe('heavy');
+    expect(config.providers.heavy?.minHeadroomPercent).toBe(20);
   });
 
   test('keeps legacy top-level MiniMax provider fields compatible', async () => {
@@ -51,7 +83,8 @@ tasks:
 `);
 
     const config = await loadGatedRunConfig(file);
-    expect(config.provider).toMatchObject({
+    expect(config.defaultProvider).toBe('default');
+    expect(config.providers.default).toMatchObject({
       type: 'minimax',
       model: 'general',
       window: 'interval',
@@ -69,6 +102,20 @@ tasks:
 `);
 
     await expect(loadGatedRunConfig(file)).rejects.toThrow(/目前只支持 minimax/);
+  });
+
+  test('rejects task provider that is not registered', async () => {
+    const file = await writeTemp(`
+providers:
+  light:
+    type: minimax
+tasks:
+  nightly:
+    provider: missing
+    cmd: pnpm test
+`);
+
+    await expect(loadGatedRunConfig(file)).rejects.toThrow(/tasks\.nightly\.provider 未注册/);
   });
 
   test('rejects unregistered command shape', async () => {

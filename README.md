@@ -326,7 +326,7 @@ node dist/minimax-usage/index.js --poll
 
 ## MiniMax-Gated-Run
 
-根据 provider 当前窗口的线性预算决定是否执行已注册任务。当前只实现 `minimax` provider；默认读取 `~/Documents/knowledge/local/.env` 里的 `MINIMAX_API_KEY`，默认注册配置为 `local/minimax-gated-run-config.yaml`。
+根据任务绑定的 provider 当前窗口线性预算决定是否执行已注册任务。当前只实现 `minimax` provider；默认读取 `~/Documents/knowledge/local/.env` 里的 `MINIMAX_API_KEY`，默认注册配置为 `local/minimax-gated-run-config.yaml`。
 
 判断规则：当前已用百分比必须小于窗口已过去时间百分比才执行；如果正好相等也跳过。例如 5 小时窗口剩 2 小时、已用 60%，线性预算也是 60%，因此不会执行。
 
@@ -349,20 +349,31 @@ node dist/minimax-gated-run/index.js run nightly --fail-on-skip
 ### 注册配置示例
 
 ```yaml
-provider:
-  type: minimax
-  model: general
-  window: interval
-  min_headroom_percent: 0
-  allow_on_unknown_quota: false
+providers:
+  minimax-general:
+    type: minimax
+    model: general
+    window: interval
+    min_headroom_percent: 0
+    allow_on_unknown_quota: false
+
+  minimax-heavy:
+    type: minimax
+    model: general
+    window: interval
+    min_headroom_percent: 20
+
+default_provider: minimax-general
 skip_exit_code: 75
 
 tasks:
   nightly:
+    provider: minimax-general
     cmd: pnpm test
     cwd: /Users/ym/Documents/projects/example
 
   report:
+    provider: minimax-heavy
     command: node
     args: ["scripts/report.js"]
     cwd: /Users/ym/Documents/projects/example
@@ -370,7 +381,7 @@ tasks:
       NODE_ENV: production
 ```
 
-任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`provider.type` 目前只支持 `minimax`，后续可在同一层扩展其它 provider。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
+任务必须先注册在 `tasks` 下，命令行不能临时传入任意命令。`providers` 是 provider 注册表，`tasks.<name>.provider` 引用其中一个 provider；任务不写 `provider` 时使用 `default_provider`。`provider.type` 目前只支持 `minimax`，后续可继续在 `providers` 下扩展其它 provider。`cmd` 走 shell，适合管道和组合命令；`command + args` 默认不走 shell。
 
 ---
 
