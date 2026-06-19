@@ -4,6 +4,17 @@ import YAML from 'yaml';
 import { expandHome } from '../minimax-usage/env';
 
 export type QuotaWindowName = 'interval' | 'weekly';
+export type ProviderType = 'minimax';
+
+export interface MiniMaxProviderConfig {
+  type: 'minimax';
+  model?: string;
+  window: QuotaWindowName;
+  minHeadroomPercent: number;
+  allowOnUnknownQuota: boolean;
+}
+
+export type ProviderConfig = MiniMaxProviderConfig;
 
 export interface RegisteredTask {
   cmd?: string;
@@ -18,10 +29,7 @@ export interface RegisteredTask {
 }
 
 export interface GatedRunConfig {
-  model?: string;
-  window: QuotaWindowName;
-  minHeadroomPercent: number;
-  allowOnUnknownQuota: boolean;
+  provider: ProviderConfig;
   skipExitCode: number;
   tasks: Record<string, RegisteredTask>;
 }
@@ -128,6 +136,49 @@ function normalizeTasks(raw: unknown): Record<string, RegisteredTask> {
   return result;
 }
 
+function normalizeProviderType(value: unknown, label: string): ProviderType {
+  if (value === undefined || value === null || value === 'minimax') return 'minimax';
+  throw new Error(`${label} 目前只支持 minimax`);
+}
+
+function readNumberAlias(obj: Record<string, unknown>, snake: string, camel: string, fallback: number, label: string): number {
+  if (obj[snake] !== undefined) return numberWithDefault(obj[snake], fallback, `${label}.${snake}`);
+  return numberWithDefault(obj[camel], fallback, `${label}.${camel}`);
+}
+
+function readBooleanAlias(obj: Record<string, unknown>, snake: string, camel: string, fallback: boolean, label: string): boolean {
+  if (obj[snake] !== undefined) return booleanWithDefault(obj[snake], fallback, `${label}.${snake}`);
+  return booleanWithDefault(obj[camel], fallback, `${label}.${camel}`);
+}
+
+function normalizeProvider(raw: unknown, root: Record<string, unknown>): ProviderConfig {
+  if (raw === undefined || raw === null || typeof raw === 'string') {
+    return {
+      type: normalizeProviderType(raw, 'provider'),
+      model: optionalString(root['model'], 'model'),
+      window: normalizeWindow(root['window'], 'interval', 'window'),
+      minHeadroomPercent: readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, '配置文件'),
+      allowOnUnknownQuota: readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, '配置文件'),
+    };
+  }
+
+  const obj = requireObject(raw, 'provider');
+  const type = normalizeProviderType(obj['type'], 'provider.type');
+  return {
+    type,
+    model: optionalString(obj['model'] ?? root['model'], 'provider.model'),
+    window: normalizeWindow(obj['window'] ?? root['window'], 'interval', 'provider.window'),
+    minHeadroomPercent:
+      obj['min_headroom_percent'] !== undefined || obj['minHeadroomPercent'] !== undefined
+        ? readNumberAlias(obj, 'min_headroom_percent', 'minHeadroomPercent', 0, 'provider')
+        : readNumberAlias(root, 'min_headroom_percent', 'minHeadroomPercent', 0, '配置文件'),
+    allowOnUnknownQuota:
+      obj['allow_on_unknown_quota'] !== undefined || obj['allowOnUnknownQuota'] !== undefined
+        ? readBooleanAlias(obj, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, 'provider')
+        : readBooleanAlias(root, 'allow_on_unknown_quota', 'allowOnUnknownQuota', false, '配置文件'),
+  };
+}
+
 export async function loadGatedRunConfig(filePath: string): Promise<GatedRunConfig> {
   const resolved = path.resolve(expandHome(filePath));
   let content: string;
@@ -143,16 +194,7 @@ export async function loadGatedRunConfig(filePath: string): Promise<GatedRunConf
   const parsed: unknown = YAML.parse(content) ?? {};
   const obj = requireObject(parsed, '配置文件');
   return {
-    model: optionalString(obj['model'], 'model'),
-    window: normalizeWindow(obj['window'], 'interval', 'window'),
-    minHeadroomPercent:
-      obj['min_headroom_percent'] !== undefined
-        ? numberWithDefault(obj['min_headroom_percent'], 0, 'min_headroom_percent')
-        : numberWithDefault(obj['minHeadroomPercent'], 0, 'minHeadroomPercent'),
-    allowOnUnknownQuota:
-      obj['allow_on_unknown_quota'] !== undefined
-        ? booleanWithDefault(obj['allow_on_unknown_quota'], false, 'allow_on_unknown_quota')
-        : booleanWithDefault(obj['allowOnUnknownQuota'], false, 'allowOnUnknownQuota'),
+    provider: normalizeProvider(obj['provider'], obj),
     skipExitCode:
       obj['skip_exit_code'] !== undefined
         ? numberWithDefault(obj['skip_exit_code'], 0, 'skip_exit_code')

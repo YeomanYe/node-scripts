@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE, readMiniMaxApiKey } from '../minimax-usage/env';
 import { fetchMiniMaxQuota } from '../minimax-usage/quota';
 import { MiniMaxQuotaSnapshot } from '../minimax-usage/types';
-import { DEFAULT_CONFIG_PATH, GatedRunConfig, loadGatedRunConfig, RegisteredTask } from './config';
+import { DEFAULT_CONFIG_PATH, GatedRunConfig, loadGatedRunConfig, ProviderConfig, RegisteredTask } from './config';
 import { evaluateMiniMaxGate, GateDecision } from './gate';
 import { runRegisteredTask } from './runner';
 
@@ -27,6 +27,13 @@ async function getSnapshot(options: BaseOptions): Promise<MiniMaxQuotaSnapshot> 
   return fetchMiniMaxQuota({ apiKey });
 }
 
+async function getProviderSnapshot(provider: ProviderConfig, options: BaseOptions): Promise<MiniMaxQuotaSnapshot> {
+  if (provider.type === 'minimax') {
+    return getSnapshot(options);
+  }
+  throw new Error(`未知 provider: ${(provider as { type: string }).type}`);
+}
+
 function resolveTask(config: GatedRunConfig, name: string): RegisteredTask {
   const task = config.tasks[name];
   if (!task) {
@@ -37,22 +44,25 @@ function resolveTask(config: GatedRunConfig, name: string): RegisteredTask {
 }
 
 function evaluateTask(config: GatedRunConfig, task: RegisteredTask, snapshot: MiniMaxQuotaSnapshot): GateDecision {
-  return evaluateMiniMaxGate({
-    snapshot,
-    model: task.model ?? config.model,
-    window: task.window ?? config.window,
-    minHeadroomPercent: task.minHeadroomPercent ?? config.minHeadroomPercent,
-    allowOnUnknownQuota: config.allowOnUnknownQuota,
-  });
+  if (config.provider.type === 'minimax') {
+    return evaluateMiniMaxGate({
+      snapshot,
+      model: task.model ?? config.provider.model,
+      window: task.window ?? config.provider.window,
+      minHeadroomPercent: task.minHeadroomPercent ?? config.provider.minHeadroomPercent,
+      allowOnUnknownQuota: config.provider.allowOnUnknownQuota,
+    });
+  }
+  throw new Error(`未知 provider: ${(config.provider as { type: string }).type}`);
 }
 
-function printDecision(decision: GateDecision, json?: boolean): void {
+function printDecision(provider: ProviderConfig, decision: GateDecision, json?: boolean): void {
   if (json) {
-    process.stdout.write(JSON.stringify(decision, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ provider: provider.type, ...decision }, null, 2) + '\n');
     return;
   }
   const model = decision.modelName ? ` model=${decision.modelName}` : '';
-  process.stdout.write(`[minimax-gated-run]${model} window=${decision.window} ${decision.reason}\n`);
+  process.stdout.write(`[minimax-gated-run] provider=${provider.type}${model} window=${decision.window} ${decision.reason}\n`);
 }
 
 async function listTasks(options: BaseOptions): Promise<void> {
@@ -62,26 +72,22 @@ async function listTasks(options: BaseOptions): Promise<void> {
 }
 
 async function checkTask(name: string, options: RunOptions): Promise<void> {
-  const [config, snapshot] = await Promise.all([
-    loadGatedRunConfig(options.config),
-    getSnapshot(options),
-  ]);
+  const config = await loadGatedRunConfig(options.config);
+  const snapshot = await getProviderSnapshot(config.provider, options);
   const task = resolveTask(config, name);
   const decision = evaluateTask(config, task, snapshot);
-  printDecision(decision, options.json);
+  printDecision(config.provider, decision, options.json);
   if (!decision.allowed && options.failOnSkip) {
     process.exitCode = config.skipExitCode || 75;
   }
 }
 
 async function runTask(name: string, options: RunOptions): Promise<void> {
-  const [config, snapshot] = await Promise.all([
-    loadGatedRunConfig(options.config),
-    getSnapshot(options),
-  ]);
+  const config = await loadGatedRunConfig(options.config);
+  const snapshot = await getProviderSnapshot(config.provider, options);
   const task = resolveTask(config, name);
   const decision = evaluateTask(config, task, snapshot);
-  printDecision(decision, options.json);
+  printDecision(config.provider, decision, options.json);
 
   if (!decision.allowed) {
     process.exitCode = options.failOnSkip ? config.skipExitCode || 75 : 0;
