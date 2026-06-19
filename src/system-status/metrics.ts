@@ -16,6 +16,13 @@ export interface DiskSample {
   percent: number;
 }
 
+export interface ProcessSample {
+  pid: number;
+  cpuPercent: number;
+  memPercent: number;
+  command: string;
+}
+
 export interface SystemSample {
   tsMs: number;
   hostname: string;
@@ -29,6 +36,7 @@ export interface SystemSample {
   load1mPerCore: number;
   disks: DiskSample[];
   battery: BatterySample | null;
+  topProcesses: ProcessSample[];
 }
 
 function runCommand(cmd: string, args: string[], timeoutMs: number): Promise<string> {
@@ -201,9 +209,41 @@ async function sampleBattery(): Promise<BatterySample | null> {
   };
 }
 
+// 解析 `ps -Aceo pid,pcpu,pmem,comm -r` 输出(按 CPU 降序,首行表头)。
+// 列: PID %CPU %MEM COMM —— COMM 用 -c 取进程名,可能含空格(如 "Google Chrome")。
+export function parseTopProcesses(stdout: string, topN: number): ProcessSample[] {
+  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  const out: ProcessSample[] = [];
+  for (const line of lines) {
+    const tokens = line.split(/\s+/);
+    if (tokens.length < 4) continue;
+    const pid = parseInt(tokens[0], 10);
+    if (!Number.isFinite(pid)) continue; // 跳过表头 / 杂行
+    const cpuPercent = parseFloat(tokens[1]);
+    const memPercent = parseFloat(tokens[2]);
+    if (!Number.isFinite(cpuPercent) || !Number.isFinite(memPercent)) continue;
+    const command = tokens.slice(3).join(' ');
+    out.push({ pid, cpuPercent, memPercent, command });
+    if (out.length >= topN) break;
+  }
+  return out;
+}
+
+async function sampleProcesses(topN: number): Promise<ProcessSample[]> {
+  if (topN <= 0) return [];
+  try {
+    // -A 全部进程, -c 取进程名(不含参数), -o 自定义列, -r 按 CPU 降序
+    const stdout = await runCommand('ps', ['-Aceo', 'pid,pcpu,pmem,comm', '-r'], 5000);
+    return parseTopProcesses(stdout, topN);
+  } catch {
+    return [];
+  }
+}
+
 export interface CollectOptions {
   cpuSampleMs?: number;
   disks?: string[];
+  topProcessCount?: number;
 }
 
 export async function collectSample(options: CollectOptions = {}): Promise<SystemSample> {
@@ -211,11 +251,13 @@ export async function collectSample(options: CollectOptions = {}): Promise<Syste
   // macOS APFS:`/` 是只读系统卷(用量很少且无变化),用户实际数据在 /System/Volumes/Data
   const defaultDisks = process.platform === 'darwin' ? ['/System/Volumes/Data'] : ['/'];
   const disksWanted = options.disks ?? defaultDisks;
-  const [cpuPercent, memory, disks, battery] = await Promise.all([
+  const topProcessCount = options.topProcessCount ?? 3;
+  const [cpuPercent, memory, disks, battery, topProcesses] = await Promise.all([
     sampleCpuPercent(cpuSampleMs),
     sampleMemory(),
     sampleDisks(disksWanted),
     sampleBattery(),
+    sampleProcesses(topProcessCount),
   ]);
   const load = os.loadavg() as [number, number, number];
   const cpuCount = os.cpus().length || 1;
@@ -232,5 +274,6 @@ export async function collectSample(options: CollectOptions = {}): Promise<Syste
     load1mPerCore: load[0] / cpuCount,
     disks,
     battery,
+    topProcesses,
   };
 }

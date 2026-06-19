@@ -26,6 +26,7 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "start": "node dist/auto-cmd/index.js",
     "execute": "node dist/auto-cmd/index.js execute",
     "test": "jest"

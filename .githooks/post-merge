@@ -1,0 +1,45 @@
+#!/bin/sh
+# post-merge —— git pull / merge 之后自动重建 dist/。
+#
+# 分发方式:本脚本受版本控制(.githooks 随仓库走),配合 package.json 的
+#   "prepare": 设置 core.hooksPath=.githooks 激活。
+# 所以每台 clone 本仓库并 `pnpm install` 过一次的机器都会自带本钩子,
+# 且 core.hooksPath 是本仓库本地配置,只对 node-scripts 生效,不影响其它仓库。
+#
+# 触发:git-pull-poll(`git pull --ff-only`)/ oc-sync-pull(`git pull`)/ 手动 pull
+# 都走真 git pull,快进合并也会触发 post-merge。
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# 本次合并引入的变更范围:ORIG_HEAD = 合并前位置。拿不到就保守地直接构建。
+if git rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
+  changed="$(git diff --name-only ORIG_HEAD HEAD 2>/dev/null)"
+else
+  changed="src/forced-build"
+fi
+
+# 仅当构建相关文件变更时才重建,纯文档 pull 不白跑 tsc。
+if ! printf '%s\n' "$changed" | grep -qE '^(src/|package\.json|tsconfig.*\.json|pnpm-lock\.yaml)'; then
+  echo "[post-merge] 无构建相关变更,跳过 build。"
+  exit 0
+fi
+
+# 解析 pnpm —— cron/pm2 触发时 PATH 可能很小,PATH 找不到再兜底常见安装位置。
+PNPM_BIN="$(command -v pnpm 2>/dev/null || true)"
+if [ -z "$PNPM_BIN" ]; then
+  for c in "$HOME/.local/share/pnpm/pnpm" "$HOME/Library/pnpm/pnpm" \
+           /opt/homebrew/bin/pnpm /usr/local/bin/pnpm; do
+    if [ -x "$c" ]; then PNPM_BIN="$c"; break; fi
+  done
+fi
+if [ -z "$PNPM_BIN" ]; then
+  echo "[post-merge] 未找到 pnpm,跳过自动构建。" >&2
+  exit 0
+fi
+
+echo "[post-merge] 构建相关文件变更,运行 pnpm run build ..."
+"$PNPM_BIN" run build || echo "[post-merge] build 失败(不阻断 git)。" >&2
+exit 0

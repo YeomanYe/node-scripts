@@ -140,6 +140,13 @@ function buildCard(sample: SystemSample): { title: string; content: string; leve
   for (const l of lines) {
     body.push(`${l.flag} **${l.label}**: ${l.value}｜阈值 ${l.threshold}${l.extra}`);
   }
+  if (sample.topProcesses.length > 0) {
+    body.push('');
+    body.push(`**🔥 最吃资源进程** (按 CPU):`);
+    for (const p of sample.topProcesses) {
+      body.push(`  · ${p.command} — CPU ${p.cpuPercent.toFixed(1)}% / 内存 ${p.memPercent.toFixed(1)}% (pid ${p.pid})`);
+    }
+  }
   body.push('');
   body.push(`**时间**: ${fmtLocalTime(sample.tsMs)}`);
 
@@ -196,6 +203,8 @@ function summaryLine(sample: SystemSample, breaches: number): string {
     `load1m/core=${sample.load1mPerCore.toFixed(2)}`,
   ];
   for (const d of sample.disks) pieces.push(`${d.mount}=${d.percent.toFixed(1)}%`);
+  const top = sample.topProcesses[0];
+  if (top) pieces.push(`top=${top.command}(${top.cpuPercent.toFixed(1)}%)`);
   pieces.push(`breaches=${breaches}`);
   return pieces.join(' ');
 }
