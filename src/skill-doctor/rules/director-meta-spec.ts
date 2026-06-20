@@ -15,7 +15,7 @@ const REQUIRED_MARKERS: RequiredMarker[] = [
   { name: 'Red Flags', pattern: /^## Red Flags/m },
   { name: 'Parallelization Plan', pattern: /^## Parallelization Plan/m },
   { name: 'Subagent Dispatch Template', pattern: /必须调用.*skill|必须显式 invoke/s },
-  { name: 'Codex Delegation Hook', pattern: /^## Codex Delegation Hook/m },
+  { name: 'Executor Selection', pattern: /^## Executor Selection/m },
   { name: 'Relationship to Other Skills', pattern: /^## Relationship/m },
 ];
 

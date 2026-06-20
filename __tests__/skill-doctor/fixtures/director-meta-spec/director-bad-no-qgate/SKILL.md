@@ -17,6 +17,6 @@ Aggregate score to Verdict mapping.
 
 必须调用 matching skill before dispatch.
 
-## Codex Delegation Hook
+## Executor Selection
 
 ## Relationship to Other Skills
