@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { bsdCompatRule } from './rules/bsd-compat';
+import { callableOnlyLeafRule } from './rules/callable-only-leaf';
 import { deadRefsRule } from './rules/dead-refs';
 import { directorMetaSpecRule } from './rules/director-meta-spec';
 import { fileSizeRule } from './rules/file-size';
@@ -19,6 +20,7 @@ const ALL_RULES: Rule[] = [
   directorMetaSpecRule,
   routerCoverageRule,
   fileSizeRule,
+  callableOnlyLeafRule,
 ];
 
 export interface RunOptions {
