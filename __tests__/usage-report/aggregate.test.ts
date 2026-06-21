@@ -46,7 +46,7 @@ describe('buildAggregateCard', () => {
     expect(card.level).toBe('warn');
   });
 
-  it('四块都在，块间有分隔线，每块带 emoji 标题', () => {
+  it('四块都在，每块标题独占一行，块间用空行分隔', () => {
     const card = buildAggregateCard(
       [ok('claude', 'claude-body'), ok('codex', 'codex-body'), ok('minimax', 'minimax-body'), ok('zai', 'zai-body')],
       { nowMs: NOW }
@@ -55,9 +55,12 @@ describe('buildAggregateCard', () => {
     expect(card.content).toContain('🟩 **Codex**');
     expect(card.content).toContain('🟪 **MiniMax**');
     expect(card.content).toContain('🟧 **Z.ai**');
-    // 4 块之间有 3 个 --- 分隔（加上顶部 header 后的 1 个共 4 个，断言至少 3 个）
-    const dividerCount = (card.content.match(/^---$/gm) || []).length;
-    expect(dividerCount).toBeGreaterThanOrEqual(4);
+    // 每个 provider 标题独占一行（标题后紧跟换行再接正文）
+    expect(card.content).toContain('🟦 **Claude**\nclaude-body');
+    // 块间用空行分隔：header 后、各 provider 块之间都是 \n\n
+    expect(card.content).toMatch(/\n\n🟦 \*\*Claude\*\*/);
+    expect(card.content).toMatch(/claude-body\n\n🟩 \*\*Codex\*\*/);
+    expect(card.content).toMatch(/codex-body\n\n🟪 \*\*MiniMax\*\*/);
   });
 
   it('ok 的块正文原样拼接（不二次格式化）', () => {

@@ -31,20 +31,18 @@ export function buildAggregateCard(results: ProviderResult[], opts: { nowMs: num
   const level: 'info' | 'warn' = anyWarn ? 'warn' : 'info';
   const title = anyWarn ? '🚨 LLM 用量告警' : '📊 LLM 用量汇总';
 
-  const blocks: string[] = [`**当前时间**：${formatLocalTime(opts.nowMs)}`];
+  // 顶部时间戳 header
+  const header = `**当前时间**：${formatLocalTime(opts.nowMs)}`;
 
-  for (const r of results) {
+  // 每个 provider 一块：标题独占一行，块与块之间用空行分隔（lark_md 里单 \n 换行较弱，
+  // 用空行让 4 个 provider 在卡片里清晰分行、互不挤压）
+  const providerBlocks = results.map((r) => {
     const { emoji, label } = PROVIDER_DISPLAY[r.key];
-    blocks.push('---');
-    blocks.push(`${emoji} **${label}**`);
-    if (r.status === 'ok') {
-      blocks.push(r.report.content);
-    } else {
-      blocks.push(`⚠️ 获取失败：${r.message}`);
-    }
-  }
+    const body = r.status === 'ok' ? r.report.content : `⚠️ 获取失败：${r.message}`;
+    return `${emoji} **${label}**\n${body}`;
+  });
 
-  const content = blocks.join('\n');
+  const content = [header, ...providerBlocks].join('\n\n');
 
   const summaryLine = results
     .map((r) => (r.status === 'ok' ? `${r.key}=${r.report.summaryLine}` : `${r.key}=ERROR:${r.message}`))
