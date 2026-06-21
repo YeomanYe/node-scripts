@@ -30,6 +30,7 @@ describe('zai-usage quota normalize', () => {
     expect(snapshot.primary?.resetsAtMs).toBe(1768507567547);
     // secondary = TIME_LIMIT
     expect(snapshot.secondary?.type).toBe('TIME_LIMIT');
+    expect(snapshot.secondary?.windowLabel).toBe('Monthly');
     expect(snapshot.secondary?.usageDetails[0]?.modelCode).toBe('search-prime');
   });
 
@@ -100,9 +101,9 @@ describe('zai-usage quota normalize', () => {
 describe('zai-usage parseZaiLimitUnit', () => {
   test('maps unit codes', () => {
     expect(parseZaiLimitUnit(1)).toEqual({ minutes: 1, label: 'minute' });
-    expect(parseZaiLimitUnit(3)).toEqual({ minutes: 300, label: '5 hour' });
-    expect(parseZaiLimitUnit(5)).toEqual({ minutes: 1440, label: '1 day' });
-    expect(parseZaiLimitUnit(6)).toEqual({ minutes: 10080, label: '1 week' });
+    expect(parseZaiLimitUnit(3)).toEqual({ minutes: 60, label: 'hour' });
+    expect(parseZaiLimitUnit(5)).toEqual({ minutes: 1440, label: 'day' });
+    expect(parseZaiLimitUnit(6)).toEqual({ minutes: 10080, label: 'week' });
     expect(parseZaiLimitUnit(0)).toEqual({ minutes: null, label: null });
     expect(parseZaiLimitUnit(undefined)).toEqual({ minutes: null, label: null });
   });

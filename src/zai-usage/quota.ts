@@ -26,36 +26,40 @@ function asNumber(value: unknown): number | null {
 }
 
 /**
- * unit code → 分钟数 + 人类可读标签（不含 "window" 后缀）。
+ * unit code → 单位粒度的分钟数 + 人类可读的单数标签（不含 "window" 后缀、不含数量）。
  *
- * 注意：Z.ai 的 unit=3 在 CodexBar 样例响应里固定搭配 number=5（5 小时窗口），
- * 因此 minutes 与 label 已把 number 语义烘焙进去（minutes=300，label='5 hour'）。
- * 这是与 `windowMinutes`/`windowLabel` 协作的结果：调用方不再额外乘 number。
+ * Z.ai 正确语义：`unit` 是单位粒度码（1=minute, 3=hour, 5=day, 6=week），
+ * `number` 是数量。窗口总分钟数 = 单位粒度分钟 × number，由调用方 `windowMinutes` 计算。
+ * 本函数只做纯粒度查表，不触碰 number。
  */
 export function parseZaiLimitUnit(unit: unknown): { minutes: number | null; label: string | null } {
   const code = asNumber(unit);
   if (code === null) return { minutes: null, label: null };
   switch (code) {
     case 1: return { minutes: 1, label: 'minute' };
-    case 3: return { minutes: 300, label: '5 hour' };
-    case 5: return { minutes: 1440, label: '1 day' };
-    case 6: return { minutes: 10080, label: '1 week' };
+    case 3: return { minutes: 60, label: 'hour' };
+    case 5: return { minutes: 1440, label: 'day' };
+    case 6: return { minutes: 10080, label: 'week' };
     default: return { minutes: null, label: null };
   }
 }
 
-function windowMinutes(type: ZaiLimitType, unit: unknown): number | null {
+function windowMinutes(type: ZaiLimitType, unit: unknown, number: unknown): number | null {
   if (type !== 'TOKENS_LIMIT') return null;
   const { minutes } = parseZaiLimitUnit(unit);
-  return minutes;
+  const n = asNumber(number);
+  if (minutes === null || n === null || n <= 0) return null;
+  return minutes * n;
 }
 
-function windowLabel(type: ZaiLimitType, unit: unknown): string | null {
+function windowLabel(type: ZaiLimitType, unit: unknown, number: unknown): string | null {
+  // TIME_LIMIT 且 unit=5（按 CodexBar 显示为 Monthly）特例
+  if (type === 'TIME_LIMIT' && asNumber(unit) === 5) return 'Monthly';
   const { label } = parseZaiLimitUnit(unit);
   if (label === null) return null;
-  const base = `${label} window`;
-  // TIME_LIMIT 且 unit=5(number=1) 按 CodexBar 显示为 Monthly
-  return type === 'TIME_LIMIT' && asNumber(unit) === 5 ? 'Monthly' : base;
+  const n = asNumber(number);
+  const pluralized = n === 1 ? label : `${label}s`;
+  return `${pluralized} window`;
 }
 
 function computeUsedPercent(limit: ZaiRawLimit): number | null {
@@ -101,8 +105,8 @@ function normalizeWindow(limit: ZaiRawLimit): ZaiLimitWindow | null {
   if (type === null) return null;
   return {
     type,
-    windowMinutes: windowMinutes(type, limit.unit),
-    windowLabel: windowLabel(type, limit.unit),
+    windowMinutes: windowMinutes(type, limit.unit, limit.number),
+    windowLabel: windowLabel(type, limit.unit, limit.number),
     usage: asNumber(limit.usage),
     remaining: asNumber(limit.remaining),
     currentValue: asNumber(limit.currentValue),
