@@ -4,6 +4,7 @@ import type { MiniMaxQuotaSnapshot } from '../../src/minimax-usage/types';
 function makeSnapshot(intervalRemaining = 97): MiniMaxQuotaSnapshot {
   return {
     raw: {},
+    planName: null,
     models: [
       {
         modelName: 'general',
