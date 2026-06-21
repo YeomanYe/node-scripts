@@ -3,13 +3,19 @@ import path from 'path';
 import YAML from 'yaml';
 import { ChannelConfig } from '../shared/notifiers/types';
 
+export type MiniMaxAlertWindow = 'interval' | 'weekly';
+
+const VALID_WINDOWS: readonly MiniMaxAlertWindow[] = ['interval', 'weekly'];
+
 export interface PollConfig {
   poll: { interval_seconds: number };
+  alert: { windows: MiniMaxAlertWindow[] };
   channels: ChannelConfig[];
 }
 
 const DEFAULTS: PollConfig = {
   poll: { interval_seconds: 300 },
+  alert: { windows: ['interval', 'weekly'] },
   channels: [],
 };
 
@@ -39,6 +45,17 @@ function validateChannel(raw: unknown, index: number): ChannelConfig {
   };
 }
 
+function validateWindows(raw: unknown): MiniMaxAlertWindow[] {
+  if (raw === undefined) return DEFAULTS.alert.windows;
+  if (!Array.isArray(raw)) throw new Error('alert.windows 必须是数组');
+  return raw.map((w, i) => {
+    if (typeof w !== 'string' || !VALID_WINDOWS.includes(w as MiniMaxAlertWindow)) {
+      throw new Error(`alert.windows[${i}] 非法: ${String(w)}`);
+    }
+    return w as MiniMaxAlertWindow;
+  });
+}
+
 export async function loadPollConfig(filePath: string): Promise<PollConfig> {
   const resolved = path.resolve(filePath);
   let content: string;
@@ -63,12 +80,16 @@ export async function loadPollConfig(filePath: string): Promise<PollConfig> {
       ? pollRaw.interval_seconds
       : DEFAULTS.poll.interval_seconds;
 
+  const alertRaw = (obj['alert'] as { windows?: unknown } | undefined) ?? {};
+  const windows = validateWindows(alertRaw.windows);
+
   const channelsRaw = (obj['channels'] as unknown[] | undefined) ?? [];
   if (!Array.isArray(channelsRaw)) throw new Error('channels 必须是数组');
   const channels = channelsRaw.map((c, i) => validateChannel(c, i));
 
   return {
     poll: { interval_seconds: interval },
+    alert: { windows },
     channels,
   };
 }

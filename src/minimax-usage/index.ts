@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG_PATH, loadPollConfig } from './config';
 import { DEFAULT_API_KEY_ENV, DEFAULT_ENV_FILE, readMiniMaxApiKey } from './env';
 import { formatQuotaText } from './format';
 import { buildPollReport, runPoll } from './poll';
-import { fetchMiniMaxQuota } from './quota';
+import { DEFAULT_MINIMAX_HOST, fetchMiniMaxQuota } from './quota';
 import { MiniMaxQuotaSnapshot } from './types';
 
 const stopSignal = { stopped: false };
@@ -18,6 +18,7 @@ interface CliOptions {
   config: string;
   envFile: string;
   apiKeyEnv: string;
+  apiHost: string;
 }
 
 function setupSignalHandlers(): void {
@@ -44,7 +45,7 @@ async function getSnapshot(options: CliOptions): Promise<MiniMaxQuotaSnapshot> {
     envFile: options.envFile,
     apiKeyEnv: options.apiKeyEnv,
   });
-  return fetchMiniMaxQuota({ apiKey });
+  return fetchMiniMaxQuota({ apiKey, apiHost: options.apiHost });
 }
 
 async function printSnapshot(options: CliOptions): Promise<void> {
@@ -61,7 +62,7 @@ async function notifyOnce(options: CliOptions): Promise<void> {
     loadPollConfig(options.config),
     getSnapshot(options),
   ]);
-  const report = buildPollReport(snapshot);
+  const report = buildPollReport(snapshot, { windows: config.alert.windows, nowMs: Date.now() });
   const notifiers = buildNotifiers(config.channels);
   const results = await Promise.allSettled(
     notifiers.map((n) => n.send({ title: report.title, content: report.content, level: report.level }))
@@ -94,6 +95,7 @@ export function createProgram(): Command {
     .option('-c, --config <path>', 'channel config path (default: ./local/claude-usage-config.yaml)', DEFAULT_CONFIG_PATH)
     .option('--env-file <path>', 'dotenv file containing MINIMAX_API_KEY', DEFAULT_ENV_FILE)
     .option('--api-key-env <name>', 'dotenv/env key name for MiniMax API key', DEFAULT_API_KEY_ENV)
+    .option('--api-host <url>', 'MiniMax API host', DEFAULT_MINIMAX_HOST)
     .option('--json', 'print raw normalized JSON')
     .action(async (options: CliOptions) => {
       if (options.poll !== undefined && options.notify) {

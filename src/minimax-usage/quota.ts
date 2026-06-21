@@ -132,11 +132,13 @@ interface HttpResponse {
 async function fetchOnce(
   doFetch: typeof fetch,
   url: string,
-  apiKey: string
+  apiKey: string,
+  signal?: AbortSignal
 ): Promise<MiniMaxQuotaSnapshot> {
   const response = (await doFetch(url, {
     method: 'GET',
     headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+    signal,
   })) as HttpResponse;
   const body = await response.text();
   if (!response.ok) {
@@ -155,13 +157,18 @@ function shouldTryLegacy(after: Error): boolean {
   return msg.includes('http 404') || msg.includes('http 405') || msg.includes('未返回');
 }
 
+function buildSignal(timeoutMs?: number): AbortSignal | undefined {
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return undefined;
+  return AbortSignal.timeout(timeoutMs);
+}
+
 export async function fetchMiniMaxQuota(options: FetchQuotaOptions): Promise<MiniMaxQuotaSnapshot> {
   const doFetch = options.fetchImpl ?? fetch;
   const host = (options.apiHost ?? DEFAULT_MINIMAX_HOST).replace(/\/+$/, '');
   try {
-    return await fetchOnce(doFetch, `${host}/${TOKEN_PLAN_PATH}`, options.apiKey);
+    return await fetchOnce(doFetch, `${host}/${TOKEN_PLAN_PATH}`, options.apiKey, buildSignal(options.timeoutMs));
   } catch (error) {
     if (!(error instanceof Error) || !shouldTryLegacy(error)) throw error;
-    return await fetchOnce(doFetch, `${host}/${CODING_PLAN_PATH}`, options.apiKey);
+    return await fetchOnce(doFetch, `${host}/${CODING_PLAN_PATH}`, options.apiKey, buildSignal(options.timeoutMs));
   }
 }

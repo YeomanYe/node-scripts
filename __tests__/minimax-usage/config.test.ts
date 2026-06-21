@@ -16,7 +16,7 @@ describe('minimax-usage loadPollConfig', () => {
 poll:
   interval_seconds: 900
 alert:
-  windows: [five_hour]
+  windows: [interval, weekly]
 channels:
   - type: feishu
     app_id: cli_x
@@ -25,7 +25,25 @@ channels:
 `);
     const cfg = await loadPollConfig(file);
     expect(cfg.poll.interval_seconds).toBe(900);
+    expect(cfg.alert.windows).toEqual(['interval', 'weekly']);
     expect(cfg.channels).toHaveLength(1);
+  });
+
+  test('defaults alert.windows to both interval and weekly', async () => {
+    const file = await writeTemp(`
+poll:
+  interval_seconds: 900
+`);
+    const cfg = await loadPollConfig(file);
+    expect(cfg.alert.windows).toEqual(['interval', 'weekly']);
+  });
+
+  test('rejects unknown alert window', async () => {
+    const file = await writeTemp(`
+alert:
+  windows: [five_hour]
+`);
+    await expect(loadPollConfig(file)).rejects.toThrow(/alert\.windows\[0\] 非法/);
   });
 
   test('rejects unknown channel type', async () => {
