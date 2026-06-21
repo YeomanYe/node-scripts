@@ -21,7 +21,8 @@
     "skill-doctor": "dist/skill-doctor/index.js",
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js",
     "system-status": "dist/system-status/index.js",
-    "knowledge-sync": "dist/knowledge-sync/index.js"
+    "knowledge-sync": "dist/knowledge-sync/index.js",
+    "zai-usage": "dist/zai-usage/index.js"
   },
   "scripts": {
     "build": "tsc",

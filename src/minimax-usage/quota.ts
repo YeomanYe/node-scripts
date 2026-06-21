@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import {
   MiniMaxModelQuota,
   MiniMaxQuotaSnapshot,
@@ -7,15 +6,16 @@ import {
   MiniMaxRawQuota,
 } from './types';
 
+export const DEFAULT_MINIMAX_HOST = 'https://api.minimaxi.com';
+const TOKEN_PLAN_PATH = 'v1/token_plan/remains';
+const CODING_PLAN_PATH = 'v1/api/openplatform/coding_plan/remains';
+
 export interface FetchQuotaOptions {
   apiKey: string;
-  command?: string;
-  commandArgs?: string[];
+  apiHost?: string;
+  fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
-
-const DEFAULT_COMMAND = 'npx';
-const DEFAULT_COMMAND_ARGS = ['-y', 'mmx-cli'];
 
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -81,82 +81,94 @@ function normalizeModel(raw: MiniMaxRawModelRemain): MiniMaxModelQuota {
   };
 }
 
+/** 兼容两种包装：HTTP 的 { data: { model_remains } } 与旧 mmx 的顶层 model_remains */
 export function extractJsonPayload(output: string): MiniMaxRawQuota {
   const start = output.indexOf('{');
   const end = output.lastIndexOf('}');
   if (start < 0 || end <= start) {
-    throw new Error('mmx quota 未返回 JSON');
+    throw new Error('minimax 响应未返回 JSON');
   }
   return JSON.parse(output.slice(start, end + 1)) as MiniMaxRawQuota;
 }
 
 export function normalizeQuota(raw: MiniMaxRawQuota): MiniMaxQuotaSnapshot {
-  const remains = Array.isArray(raw.model_remains) ? raw.model_remains : [];
-  return {
-    models: remains.map((item) => normalizeModel(item as MiniMaxRawModelRemain)),
-    raw,
-  };
+  const dataEnvelope = (raw as { data?: { model_remains?: unknown; plan_name?: unknown } | null }).data;
+  const remainsSource = Array.isArray((dataEnvelope as { model_remains?: unknown } | null)?.model_remains)
+    ? (dataEnvelope as { model_remains: unknown[] }).model_remains
+    : Array.isArray((raw as { model_remains?: unknown }).model_remains)
+      ? (raw as { model_remains: unknown[] }).model_remains
+      : [];
+
+  // base_resp 状态校验（HTTP 包装在顶层或 data 内）
+  const baseResp = (raw as { base_resp?: { status_code?: unknown; status_msg?: unknown } }).base_resp
+    ?? (dataEnvelope as { base_resp?: { status_code?: unknown; status_msg?: unknown } } | null)?.base_resp;
+  const statusCode = asNumber(baseResp?.status_code);
+  if (statusCode !== null && statusCode !== 0) {
+    const msg = typeof baseResp?.status_msg === 'string' ? baseResp.status_msg : `status_code ${statusCode}`;
+    const lower = msg.toLowerCase();
+    if (statusCode === 1004 || lower.includes('cookie') || lower.includes('log in') || lower.includes('login')) {
+      throw new Error(`minimax 凭据无效: ${msg}`);
+    }
+    throw new Error(`minimax 用量查询失败: ${msg}`);
+  }
+
+  if (remainsSource.length === 0) throw new Error('minimax 未返回 model_remains 数据');
+
+  const models = remainsSource.map((item) => normalizeModel(item as MiniMaxRawModelRemain));
+  const planName =
+    typeof (dataEnvelope as { plan_name?: unknown } | null)?.plan_name === 'string'
+      ? ((dataEnvelope as { plan_name: string }).plan_name).trim() || null
+      : null;
+
+  return { models, planName, raw };
 }
 
-function commandFailedMessage(code: number | null, stderr: string, stdout: string): string {
-  const raw = `${stderr}\n${stdout}`.trim();
-  if (!raw) return `mmx quota 执行失败 (${code ?? 'unknown'})`;
-  return `mmx quota 执行失败 (${code ?? 'unknown'}): ${raw}`;
+interface HttpResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
 }
 
-export function fetchMiniMaxQuota(options: FetchQuotaOptions): Promise<MiniMaxQuotaSnapshot> {
-  return new Promise((resolve, reject) => {
-    const command = options.command ?? DEFAULT_COMMAND;
-    const commandArgs = options.commandArgs ?? DEFAULT_COMMAND_ARGS;
-    const args = [
-      ...commandArgs,
-      '--api-key',
-      options.apiKey,
-      '--output',
-      'json',
-      '--quiet',
-      '--non-interactive',
-      'quota',
-      'show',
-    ];
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
+async function fetchOnce(
+  doFetch: typeof fetch,
+  url: string,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<MiniMaxQuotaSnapshot> {
+  const response = (await doFetch(url, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+    signal,
+  })) as HttpResponse;
+  const body = await response.text();
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`minimax 凭据无效 (HTTP ${response.status})`);
+    }
+    throw new Error(`minimax 用量查询失败 (HTTP ${response.status}): ${body || 'unknown error'}`);
+  }
+  return normalizeQuota(extractJsonPayload(body));
+}
 
-    const timeoutMs = options.timeoutMs ?? 120_000;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill('SIGTERM');
-      reject(new Error(`mmx quota 超时 (${timeoutMs}ms)`));
-    }, timeoutMs);
+/** 是否应 fallback 到旧端点（照搬 CodexBar shouldTryLegacyAPIEndpoint） */
+function shouldTryLegacy(after: Error): boolean {
+  const msg = after.message.toLowerCase();
+  if (msg.includes('凭据')) return false;
+  return msg.includes('http 404') || msg.includes('http 405') || msg.includes('未返回');
+}
 
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(new Error(`mmx quota 启动失败: ${error.message}`));
-    });
-    child.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (code !== 0) {
-        reject(new Error(commandFailedMessage(code, stderr, stdout)));
-        return;
-      }
-      try {
-        resolve(normalizeQuota(extractJsonPayload(stdout)));
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
+function buildSignal(timeoutMs?: number): AbortSignal | undefined {
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return undefined;
+  return AbortSignal.timeout(timeoutMs);
+}
+
+export async function fetchMiniMaxQuota(options: FetchQuotaOptions): Promise<MiniMaxQuotaSnapshot> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const host = (options.apiHost ?? DEFAULT_MINIMAX_HOST).replace(/\/+$/, '');
+  try {
+    return await fetchOnce(doFetch, `${host}/${TOKEN_PLAN_PATH}`, options.apiKey, buildSignal(options.timeoutMs));
+  } catch (error) {
+    if (!(error instanceof Error) || !shouldTryLegacy(error)) throw error;
+    return await fetchOnce(doFetch, `${host}/${CODING_PLAN_PATH}`, options.apiKey, buildSignal(options.timeoutMs));
+  }
 }

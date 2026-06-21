@@ -19,6 +19,12 @@ export interface MiniMaxRawModelRemain {
 export interface MiniMaxRawQuota {
   model_remains?: unknown;
   base_resp?: unknown;
+  data?: {
+    model_remains?: unknown;
+    plan_name?: unknown;
+    points_balance?: unknown;
+    [key: string]: unknown;
+  } | null;
   [key: string]: unknown;
 }
 
@@ -41,5 +47,6 @@ export interface MiniMaxModelQuota {
 
 export interface MiniMaxQuotaSnapshot {
   models: MiniMaxModelQuota[];
+  planName: string | null;
   raw: MiniMaxRawQuota;
 }

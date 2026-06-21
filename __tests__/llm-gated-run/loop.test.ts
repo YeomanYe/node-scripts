@@ -6,6 +6,7 @@ function makeSnapshot(): MiniMaxQuotaSnapshot {
   const now = Date.now();
   return {
     raw: {},
+    planName: null,
     models: [
       {
         modelName: 'general',

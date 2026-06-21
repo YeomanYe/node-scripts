@@ -4,6 +4,7 @@ import { MiniMaxQuotaSnapshot } from '../../src/minimax-usage/types';
 function makeSnapshot(usedPercent: number): MiniMaxQuotaSnapshot {
   return {
     raw: {},
+    planName: null,
     models: [
       {
         modelName: 'general',
@@ -65,7 +66,7 @@ describe('llm-gated-run gate', () => {
 
   test('skips unknown quota by default', () => {
     const decision = evaluateMiniMaxGate({
-      snapshot: { raw: {}, models: [] },
+      snapshot: { raw: {}, planName: null, models: [] },
       model: 'general',
       window: 'interval',
       minHeadroomPercent: 0,

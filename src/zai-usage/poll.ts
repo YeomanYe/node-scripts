@@ -1,28 +1,27 @@
 import { buildNotifiers } from '../shared/notifiers';
 import { NotifierMessage } from '../shared/notifiers/types';
 import { checkProrated, ProratedResult } from '../shared/alert/prorated';
-import { MiniMaxAlertWindow, PollConfig } from './config';
+import { PollConfig, ZaiAlertWindow } from './config';
 import { formatLocalTime } from './format';
-import { MiniMaxModelQuota, MiniMaxQuotaWindow, MiniMaxQuotaSnapshot } from './types';
+import { ZaiLimitWindow, ZaiUsageSnapshot } from './types';
 
 interface WindowMeta {
   label: string;
-  get: (m: MiniMaxModelQuota) => MiniMaxQuotaWindow;
+  get: (s: ZaiUsageSnapshot) => ZaiLimitWindow | null;
 }
 
-const WINDOWS: Record<MiniMaxAlertWindow, WindowMeta> = {
-  interval: { label: '5小时', get: (m) => m.interval },
-  weekly: { label: '周', get: (m) => m.weekly },
+const WINDOWS: Record<ZaiAlertWindow, WindowMeta> = {
+  primary: { label: '主窗口', get: (s) => s.primary },
+  secondary: { label: '次窗口', get: (s) => s.secondary },
 };
 
 export interface ReportOptions {
-  windows: MiniMaxAlertWindow[];
+  windows: ZaiAlertWindow[];
   nowMs: number;
 }
 
 export interface AlertEntry {
-  window: MiniMaxAlertWindow;
-  model: string;
+  window: ZaiAlertWindow;
   label: string;
   utilization: number;
   result: ProratedResult;
@@ -33,48 +32,46 @@ export interface PollReport extends NotifierMessage {
   summaryLine: string;
 }
 
-export function buildPollReport(snapshot: MiniMaxQuotaSnapshot, options: ReportOptions): PollReport {
+export function buildPollReport(snapshot: ZaiUsageSnapshot, options: ReportOptions): PollReport {
   const entries: AlertEntry[] = [];
   const lines: string[] = [];
 
-  for (const model of snapshot.models) {
-    for (const key of options.windows) {
-      const meta = WINDOWS[key];
-      const win = meta.get(model);
-      const resetLabel = win.endMs !== null && win.endMs > 0 ? ` ｜结束 ${formatLocalTime(win.endMs)}` : '';
-      const utilization = win.usedPercent ?? 0;
-      const windowMs = win.endMs !== null && win.startMs !== null ? win.endMs - win.startMs : null;
+  for (const key of options.windows) {
+    const meta = WINDOWS[key];
+    const win = meta.get(snapshot);
+    if (!win) continue;
 
-      if (windowMs === null || windowMs <= 0) {
-        lines.push(`  ${model.modelName} ${meta.label}：${utilization.toFixed(1)}% ｜窗口时长未知，跳过告警判定${resetLabel}`);
-        continue;
-      }
+    const resetLabel = win.resetsAtMs && win.resetsAtMs > 0 ? ` ｜结束 ${formatLocalTime(win.resetsAtMs)}` : '';
+    const utilization = win.usedPercent ?? 0;
 
-      const result = checkProrated({
-        utilization,
-        resetsAtMs: win.endMs ?? 0,
-        windowMs,
-        nowMs: options.nowMs,
-      });
-      entries.push({ window: key, model: model.modelName, label: meta.label, utilization, result });
-
-      const prefix = result.breached ? '🚨' : '  ';
-      const diffLabel = result.breached ? `超 ${result.overBy.toFixed(1)}pp` : `差 ${result.overBy.toFixed(1)}pp`;
-      lines.push(`${prefix} ${model.modelName} ${meta.label}：${utilization.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}${resetLabel}`);
+    if (win.windowMinutes === null || win.windowMinutes <= 0) {
+      lines.push(`  ${meta.label}：${utilization.toFixed(1)}% ｜windowMinutes 未知，跳过告警判定${resetLabel}`);
+      continue;
     }
+
+    const result = checkProrated({
+      utilization,
+      resetsAtMs: win.resetsAtMs ?? 0,
+      windowMs: win.windowMinutes * 60_000,
+      nowMs: options.nowMs,
+    });
+    entries.push({ window: key, label: meta.label, utilization, result });
+
+    const prefix = result.breached ? '🚨' : '  ';
+    const diffLabel = result.breached ? `超 ${result.overBy.toFixed(1)}pp` : `差 ${result.overBy.toFixed(1)}pp`;
+    lines.push(`${prefix} ${meta.label}：${utilization.toFixed(1)}% ｜线性预算 ${result.expected.toFixed(1)}% ｜${diffLabel}${resetLabel}`);
   }
 
   const alerts = entries.filter((e) => e.result.breached);
   const level: 'info' | 'warn' = alerts.length > 0 ? 'warn' : 'info';
-  const title = level === 'warn' ? '🚨 MiniMax 用量告警' : '📊 MiniMax 用量报告';
-  const plan = snapshot.planName ? `**套餐**：${snapshot.planName} ｜ ` : '';
-  const header = `${plan}**当前时间**：${formatLocalTime(options.nowMs)}`;
-  const content = [header, '', ...(lines.length > 0 ? lines : ['未返回模型用量数据'])].join('\n');
+  const title = level === 'warn' ? '🚨 Z.ai 用量告警' : '📊 Z.ai 用量报告';
+  const plan = snapshot.planName ? ` ｜**套餐**：${snapshot.planName}` : '';
+  const header = `${plan} ｜**当前时间**：${formatLocalTime(options.nowMs)}`.trim();
+  const content = [header, '', ...lines].join('\n').trim();
 
   const summaryLine =
-    entries
-      .map((e) => `${e.model}.${e.window}=${e.utilization.toFixed(1)}%(exp${e.result.expected.toFixed(1)}%)`)
-      .join(' ') + ` alert=${alerts.length > 0}`;
+    entries.map((e) => `${e.window}=${e.utilization.toFixed(1)}%(exp${e.result.expected.toFixed(1)}%)`).join(' ') +
+    ` alert=${alerts.length > 0}`;
 
   return { title, content, level, alerts, summaryLine };
 }
@@ -83,7 +80,7 @@ export interface RunPollOptions {
   intervalSec: number;
   config: PollConfig;
   signal: { stopped: boolean };
-  fetcher: () => Promise<MiniMaxQuotaSnapshot>;
+  fetcher: () => Promise<ZaiUsageSnapshot>;
   notifiersOverride?: ReturnType<typeof buildNotifiers>;
   logLine?: (line: string) => void;
   logError?: (line: string) => void;
@@ -91,7 +88,7 @@ export interface RunPollOptions {
 
 export async function runOnce(options: {
   config: PollConfig;
-  fetcher: () => Promise<MiniMaxQuotaSnapshot>;
+  fetcher: () => Promise<ZaiUsageSnapshot>;
   notifiers: ReturnType<typeof buildNotifiers>;
   logLine: (line: string) => void;
   logError: (line: string) => void;
@@ -99,7 +96,6 @@ export async function runOnce(options: {
   const snapshot = await options.fetcher();
   const report = buildPollReport(snapshot, { windows: options.config.alert.windows, nowMs: Date.now() });
   options.logLine(`[${new Date().toISOString()}] ${report.summaryLine}`);
-
   const results = await Promise.allSettled(
     options.notifiers.map((n) => n.send({ title: report.title, content: report.content, level: report.level }))
   );

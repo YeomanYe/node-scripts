@@ -3,30 +3,26 @@ import path from 'path';
 import YAML from 'yaml';
 import { ChannelConfig } from '../shared/notifiers/types';
 
-export type MiniMaxAlertWindow = 'interval' | 'weekly';
-
-const VALID_WINDOWS: readonly MiniMaxAlertWindow[] = ['interval', 'weekly'];
+export type ZaiAlertWindow = 'primary' | 'secondary';
+const VALID_WINDOWS: readonly ZaiAlertWindow[] = ['primary', 'secondary'];
 
 export interface PollConfig {
   poll: { interval_seconds: number };
-  alert: { windows: MiniMaxAlertWindow[] };
+  alert: { windows: ZaiAlertWindow[] };
   channels: ChannelConfig[];
 }
 
 const DEFAULTS: PollConfig = {
   poll: { interval_seconds: 300 },
-  alert: { windows: ['interval', 'weekly'] },
+  alert: { windows: ['primary', 'secondary'] },
   channels: [],
 };
 
 function validateChannel(raw: unknown, index: number): ChannelConfig {
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error(`channels[${index}] 不是对象`);
-  }
+  if (typeof raw !== 'object' || raw === null) throw new Error(`channels[${index}] 不是对象`);
   const obj = raw as Record<string, unknown>;
-  if (obj['type'] !== 'feishu') {
+  if (obj['type'] !== 'feishu')
     throw new Error(`未知通道类型 channels[${index}].type=${String(obj['type'])}`);
-  }
   const required = ['app_id', 'app_secret', 'receive_id'] as const;
   for (const key of required) {
     if (typeof obj[key] !== 'string' || (obj[key] as string).length === 0) {
@@ -45,14 +41,14 @@ function validateChannel(raw: unknown, index: number): ChannelConfig {
   };
 }
 
-function validateWindows(raw: unknown): MiniMaxAlertWindow[] {
+function validateWindows(raw: unknown): ZaiAlertWindow[] {
   if (raw === undefined) return DEFAULTS.alert.windows;
   if (!Array.isArray(raw)) throw new Error('alert.windows 必须是数组');
   return raw.map((w, i) => {
-    if (typeof w !== 'string' || !VALID_WINDOWS.includes(w as MiniMaxAlertWindow)) {
+    if (typeof w !== 'string' || !VALID_WINDOWS.includes(w as ZaiAlertWindow)) {
       throw new Error(`alert.windows[${i}] 非法: ${String(w)}`);
     }
-    return w as MiniMaxAlertWindow;
+    return w as ZaiAlertWindow;
   });
 }
 
@@ -62,16 +58,12 @@ export async function loadPollConfig(filePath: string): Promise<PollConfig> {
   try {
     content = await fs.readFile(resolved, 'utf-8');
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       throw new Error(`配置文件不存在: ${resolved}`);
-    }
     throw error;
   }
-
   const parsed: unknown = YAML.parse(content) ?? {};
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error('配置文件格式无效：不是对象');
-  }
+  if (typeof parsed !== 'object' || parsed === null) throw new Error('配置文件格式无效：不是对象');
   const obj = parsed as Record<string, unknown>;
 
   const pollRaw = (obj['poll'] as { interval_seconds?: unknown } | undefined) ?? {};
@@ -87,11 +79,7 @@ export async function loadPollConfig(filePath: string): Promise<PollConfig> {
   if (!Array.isArray(channelsRaw)) throw new Error('channels 必须是数组');
   const channels = channelsRaw.map((c, i) => validateChannel(c, i));
 
-  return {
-    poll: { interval_seconds: interval },
-    alert: { windows },
-    channels,
-  };
+  return { poll: { interval_seconds: interval }, alert: { windows }, channels };
 }
 
-export const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/claude-usage-config.yaml');
+export const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'local/zai-usage-config.yaml');
