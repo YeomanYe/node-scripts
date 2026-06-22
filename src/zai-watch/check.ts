@@ -46,11 +46,26 @@ export function statusMatches(status: number, spec: string): boolean {
   return parseStatusSpec(spec)(status);
 }
 
+/**
+ * 纯函数:把字符串里的 `${VAR}` 替换为 env.VAR(未设置 → 空字符串)。
+ * 支持一个字符串里多个 `${}`;无 `${}` 时原样返回(no-op)。
+ * 仅接受 [A-Za-z_][A-Za-z0-9_]* 形式的变量名。
+ */
+export function interpolateEnv(value: string, env: NodeJS.ProcessEnv = process.env): string {
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => env[name] ?? '');
+}
+
 export interface CheckOptions {
   timeoutMs: number;
   successStatus: string;
   mustInclude?: string;
   mustNotInclude?: string;
+  /** HTTP 方法,默认 GET。 */
+  method?: string;
+  /** 请求头。 */
+  headers?: Record<string, string>;
+  /** 请求体(字符串)。对象请在配置解析阶段 JSON.stringify 后传入。 */
+  body?: string;
   /** 可注入的 fetch 实现,默认用全局 fetch;测试时注入 mock。 */
   fetchImpl?: typeof fetch;
 }
@@ -76,7 +91,14 @@ export async function checkOnce(url: string, opts: CheckOptions): Promise<CheckR
   const started = Date.now();
 
   try {
-    const res = await fetchImpl(url, { redirect: 'follow', signal: controller.signal });
+    const init: RequestInit = {
+      method: opts.method ?? 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+    };
+    if (opts.headers) init.headers = opts.headers;
+    if (opts.body !== undefined) init.body = opts.body;
+    const res = await fetchImpl(url, init);
     const status = res.status;
     let body = '';
     if (needBody) {

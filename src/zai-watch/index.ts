@@ -18,7 +18,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { Command } from 'commander';
 import { parse as parseYaml } from 'yaml';
-import { checkOnce } from './check';
+import { checkOnce, interpolateEnv } from './check';
 
 interface ZaiWatchConfig {
   url: string;
@@ -28,6 +28,12 @@ interface ZaiWatchConfig {
   consecutive: number;
   mustInclude?: string;
   mustNotInclude?: string;
+  /** HTTP 方法,默认 GET(本场景为 POST)。 */
+  method: string;
+  /** 请求头(已做 ${ENV} 插值)。 */
+  headers?: Record<string, string>;
+  /** 请求体(字符串,已做 ${ENV} 插值;对象会在解析阶段 JSON.stringify)。 */
+  body?: string;
   project: string;
   label?: string;
   maxChecks?: number;
@@ -39,6 +45,7 @@ const DEFAULTS: ZaiWatchConfig = {
   timeoutSec: 10,
   successStatus: '200-399',
   consecutive: 2,
+  method: 'GET',
   project: 'default',
 };
 
@@ -61,8 +68,11 @@ function logErr(msg: string): void {
 
 // ───────────────────────── 配置加载(YAML/JSON 文件 + CLI 覆盖) ─────────────────────────
 
-/** 把任意来源的原始配置对象规整成 Partial<ZaiWatchConfig>(同时兼容 snake_case)。 */
-function normalizeRaw(raw: Record<string, unknown>): Partial<ZaiWatchConfig> {
+/** normalizeRaw 的中间产物:Partial 配置 + body 是否来自对象的标记。 */
+type RawConfig = Partial<ZaiWatchConfig> & { _bodyWasObject?: boolean };
+
+/** 把任意来源的原始配置对象规整成 RawConfig(同时兼容 snake_case)。 */
+function normalizeRaw(raw: Record<string, unknown>): RawConfig {
   const pick = (...keys: string[]): unknown => {
     for (const k of keys) {
       if (raw[k] !== undefined && raw[k] !== null) return raw[k];
@@ -76,7 +86,7 @@ function normalizeRaw(raw: Record<string, unknown>): Partial<ZaiWatchConfig> {
   };
   const str = (v: unknown): string | undefined => (v === undefined ? undefined : String(v));
 
-  const out: Partial<ZaiWatchConfig> = {};
+  const out: RawConfig = {};
   const url = str(pick('url'));
   if (url !== undefined) out.url = url;
   const intervalSec = num(pick('intervalSec', 'interval_sec', 'interval'));
@@ -91,6 +101,22 @@ function normalizeRaw(raw: Record<string, unknown>): Partial<ZaiWatchConfig> {
   if (mustInclude !== undefined) out.mustInclude = mustInclude;
   const mustNotInclude = str(pick('mustNotInclude', 'must_not_include'));
   if (mustNotInclude !== undefined) out.mustNotInclude = mustNotInclude;
+  const method = str(pick('method'));
+  if (method !== undefined) out.method = method.toUpperCase();
+  const headersRaw = pick('headers');
+  if (headersRaw && typeof headersRaw === 'object' && !Array.isArray(headersRaw)) {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headersRaw as Record<string, unknown>)) {
+      headers[k] = String(v);
+    }
+    out.headers = headers;
+  }
+  const bodyRaw = pick('body');
+  if (bodyRaw !== undefined && bodyRaw !== null) {
+    // body 可为字符串或对象;对象 → JSON.stringify 并标记,以便缺省时补 content-type。
+    out.body = typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw);
+    out._bodyWasObject = typeof bodyRaw !== 'string';
+  }
   const project = str(pick('project'));
   if (project !== undefined) out.project = project;
   const label = str(pick('label'));
@@ -101,7 +127,7 @@ function normalizeRaw(raw: Record<string, unknown>): Partial<ZaiWatchConfig> {
 }
 
 /** 从文件加载配置(支持 YAML 与 JSON,按内容解析)。文件不存在 → 返回 {}。 */
-function loadConfigFile(configPath: string): Partial<ZaiWatchConfig> {
+function loadConfigFile(configPath: string): RawConfig {
   const resolved = path.resolve(configPath.replace(/^~/, os.homedir()));
   if (!fs.existsSync(resolved)) {
     logErr(`zai-watch: 配置文件不存在,忽略: ${resolved}`);
@@ -139,9 +165,9 @@ function ccConnectSend(project: string, message: string): Promise<SpawnResult> {
 function buildMessage(cfg: ZaiWatchConfig, status: number | null, timeMs: number): string {
   const label = cfg.label ?? cfg.url;
   return [
-    '✅ z.ai 已可正常访问',
+    '✅ z.ai token 已可正常使用',
     `目标: ${label}`,
-    `状态: HTTP ${status ?? '?'} · 用时 ${timeMs}ms · 连续 ${cfg.consecutive} 次 OK`,
+    `状态: HTTP ${status ?? '?'} · 用时 ${timeMs}ms`,
     `时间: ${fmtLocalTime()}`,
   ].join('\n');
 }
@@ -189,7 +215,7 @@ async function runLoop(cfg: ZaiWatchConfig): Promise<void> {
   setupSignalHandlers(timerRef);
 
   logOut(
-    `zai-watch started — url=${cfg.url} interval=${cfg.intervalSec}s timeout=${cfg.timeoutSec}s ` +
+    `zai-watch started — ${cfg.method} ${cfg.url} interval=${cfg.intervalSec}s timeout=${cfg.timeoutSec}s ` +
       `successStatus=${cfg.successStatus} consecutive=${cfg.consecutive} project=${cfg.project}` +
       `${cfg.maxChecks ? ` maxChecks=${cfg.maxChecks}` : ''}`,
   );
@@ -207,6 +233,9 @@ async function runLoop(cfg: ZaiWatchConfig): Promise<void> {
         successStatus: cfg.successStatus,
         mustInclude: cfg.mustInclude,
         mustNotInclude: cfg.mustNotInclude,
+        method: cfg.method,
+        headers: cfg.headers,
+        body: cfg.body,
       });
     } catch (err) {
       // checkOnce 理论上不抛,这里兜底,绝不让一次探测打死守护。
@@ -246,6 +275,39 @@ async function runLoop(cfg: ZaiWatchConfig): Promise<void> {
   }, cfg.intervalSec * 1000);
 }
 
+// ───────────────────────── --once / --dry-run ─────────────────────────
+
+/**
+ * 只跑一次探测,打印结果与「将要发送」的汇报文案,不经 cc-connect 发任何东西。
+ * exit code:ok → 0,否则 1。供安全验证(避免误发真实飞书消息)。
+ */
+async function runOnce(cfg: ZaiWatchConfig): Promise<void> {
+  logOut(`zai-watch --once — ${cfg.method} ${cfg.url} timeout=${cfg.timeoutSec}s successStatus=${cfg.successStatus}`);
+  let res;
+  try {
+    res = await checkOnce(cfg.url, {
+      timeoutMs: cfg.timeoutSec * 1000,
+      successStatus: cfg.successStatus,
+      mustInclude: cfg.mustInclude,
+      mustNotInclude: cfg.mustNotInclude,
+      method: cfg.method,
+      headers: cfg.headers,
+      body: cfg.body,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res = { ok: false, status: null as number | null, timeMs: 0, error: msg };
+  }
+
+  logOut(
+    `zai-watch --once 结果: ok=${res.ok} status=HTTP ${res.status ?? 'ERR'} timeMs=${res.timeMs}` +
+      `${res.error ? ` error=${res.error}` : ''}`,
+  );
+  const message = buildMessage(cfg, res.status, res.timeMs);
+  logOut(`zai-watch --once 将要发送的汇报(dry-run,未发送):\n${message}`);
+  process.exit(res.ok ? 0 : 1);
+}
+
 // ───────────────────────── CLI ─────────────────────────
 
 interface CliOptions {
@@ -257,26 +319,57 @@ interface CliOptions {
   consecutive?: string;
   mustInclude?: string;
   mustNotInclude?: string;
+  method?: string;
   project?: string;
   label?: string;
   maxChecks?: string;
+  once?: boolean;
+  dryRun?: boolean;
 }
 
-/** 合并优先级:CLI flag > 配置文件 > 内置默认值。 */
-export function resolveConfig(opts: CliOptions, fileCfg: Partial<ZaiWatchConfig>): ZaiWatchConfig {
+/**
+ * 合并优先级:CLI flag > 配置文件 > 内置默认值。
+ * 同时对 url / headers / body 做 `${ENV}` 插值(从 env 注入,默认 process.env),
+ * 并在 body 来自对象且未显式指定 content-type 时补 application/json。
+ */
+export function resolveConfig(
+  opts: CliOptions,
+  fileCfg: RawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ZaiWatchConfig {
   const numOpt = (v: string | undefined): number | undefined => {
     if (v === undefined) return undefined;
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   };
+
+  // ${ENV} 插值:headers 的每个 value、body、url。
+  let headers: Record<string, string> | undefined;
+  if (fileCfg.headers) {
+    headers = {};
+    for (const [k, v] of Object.entries(fileCfg.headers)) headers[k] = interpolateEnv(v, env);
+  }
+  // body 来自对象且 headers 未声明 content-type → 补默认。
+  if (fileCfg._bodyWasObject) {
+    const hasContentType =
+      headers && Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+    if (!hasContentType) {
+      headers = { ...(headers ?? {}), 'content-type': 'application/json' };
+    }
+  }
+  const body = fileCfg.body !== undefined ? interpolateEnv(fileCfg.body, env) : undefined;
+
   const merged: ZaiWatchConfig = {
-    url: opts.url ?? fileCfg.url ?? DEFAULTS.url,
+    url: interpolateEnv(opts.url ?? fileCfg.url ?? DEFAULTS.url, env),
     intervalSec: numOpt(opts.interval) ?? fileCfg.intervalSec ?? DEFAULTS.intervalSec,
     timeoutSec: numOpt(opts.timeout) ?? fileCfg.timeoutSec ?? DEFAULTS.timeoutSec,
     successStatus: opts.successStatus ?? fileCfg.successStatus ?? DEFAULTS.successStatus,
     consecutive: numOpt(opts.consecutive) ?? fileCfg.consecutive ?? DEFAULTS.consecutive,
     mustInclude: opts.mustInclude ?? fileCfg.mustInclude,
     mustNotInclude: opts.mustNotInclude ?? fileCfg.mustNotInclude,
+    method: (opts.method ?? fileCfg.method ?? DEFAULTS.method).toUpperCase(),
+    headers,
+    body,
     project: opts.project ?? fileCfg.project ?? DEFAULTS.project,
     label: opts.label ?? fileCfg.label,
     maxChecks: numOpt(opts.maxChecks) ?? fileCfg.maxChecks,
@@ -298,14 +391,22 @@ async function main(): Promise<void> {
     .option('--consecutive <n>', `判定可访问前所需的连续 OK 次数 (默认 ${DEFAULTS.consecutive})`)
     .option('--must-include <text>', '响应体必须包含的文本(可选)')
     .option('--must-not-include <text>', '响应体必须不包含的文本(可选,如封锁/错误页标记)')
+    .option('--method <verb>', `HTTP 方法 (默认 ${DEFAULTS.method})`)
     .option('--project <name>', `cc-connect 汇报目标 project (默认 ${DEFAULTS.project})`)
     .option('--label <text>', '汇报中的友好名称(默认 = url)')
     .option('--max-checks <n>', '最多探测次数;到达仍未成功则以非 0 退出(默认不限)')
+    .option('--once', '只探测一次,打印结果与「将要发送」的汇报文案,不发任何东西即退(ok→0 否则 1)')
+    .option('--dry-run', '同 --once:只探测一次并 dry-run,不发送')
     .parse(process.argv);
 
   const opts = program.opts<CliOptions>();
   const fileCfg = opts.config ? loadConfigFile(opts.config) : {};
   const cfg = resolveConfig(opts, fileCfg);
+
+  if (opts.once || opts.dryRun) {
+    await runOnce(cfg);
+    return;
+  }
 
   await runLoop(cfg);
 }

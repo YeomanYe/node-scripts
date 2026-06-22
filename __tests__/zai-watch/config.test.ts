@@ -41,4 +41,65 @@ describe('resolveConfig (CLI > file > defaults)', () => {
     expect(cfg.maxChecks).toBe(3);
     expect(cfg.label).toBe('z.ai 主站');
   });
+
+  it('defaults method to GET', () => {
+    expect(resolveConfig({}, {}).method).toBe('GET');
+  });
+
+  it('carries method/headers/body and interpolates ${ENV} from injected env', () => {
+    const cfg = resolveConfig(
+      {},
+      {
+        method: 'POST',
+        headers: { 'x-api-key': '${Z_API_KEY}', 'anthropic-version': '2023-06-01' },
+        body: '{"model":"glm-4.6"}',
+      },
+      { Z_API_KEY: 'sk-real-token' } as NodeJS.ProcessEnv,
+    );
+    expect(cfg.method).toBe('POST');
+    expect(cfg.headers).toEqual({
+      'x-api-key': 'sk-real-token',
+      'anthropic-version': '2023-06-01',
+    });
+    expect(cfg.body).toBe('{"model":"glm-4.6"}');
+  });
+
+  it('interpolates ${ENV} inside url too', () => {
+    const cfg = resolveConfig(
+      {},
+      { url: 'https://${HOST}/v1' },
+      { HOST: 'api.z.ai' } as NodeJS.ProcessEnv,
+    );
+    expect(cfg.url).toBe('https://api.z.ai/v1');
+  });
+
+  it('object body gets JSON.stringified and default content-type applied', () => {
+    // normalizeRaw is not exported; emulate its output (_bodyWasObject + stringified body).
+    const cfg = resolveConfig(
+      {},
+      {
+        method: 'POST',
+        headers: { 'x-api-key': 'k' },
+        body: '{"a":1}',
+        _bodyWasObject: true,
+      },
+      {} as NodeJS.ProcessEnv,
+    );
+    expect(cfg.headers).toEqual({ 'x-api-key': 'k', 'content-type': 'application/json' });
+    expect(cfg.body).toBe('{"a":1}');
+  });
+
+  it('does not override an explicit content-type for object body', () => {
+    const cfg = resolveConfig(
+      {},
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: '{"a":1}',
+        _bodyWasObject: true,
+      },
+      {} as NodeJS.ProcessEnv,
+    );
+    expect(cfg.headers).toEqual({ 'Content-Type': 'application/json; charset=utf-8' });
+  });
 });

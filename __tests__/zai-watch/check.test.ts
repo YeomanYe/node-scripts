@@ -1,4 +1,4 @@
-import { parseStatusSpec, statusMatches, checkOnce } from '../../src/zai-watch/check';
+import { parseStatusSpec, statusMatches, checkOnce, interpolateEnv } from '../../src/zai-watch/check';
 
 describe('parseStatusSpec / statusMatches', () => {
   it('matches a single status', () => {
@@ -143,5 +143,83 @@ describe('checkOnce (injected fetch)', () => {
       fetchImpl,
     });
     expect(r.ok).toBe(true);
+  });
+
+  it('passes method / headers / body to fetch', async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    const fetchImpl = mkFetch(async (url, init) => {
+      seenUrl = url;
+      seenInit = init;
+      return mkResponse(200);
+    });
+    const r = await checkOnce('https://api.z.ai/api/anthropic/v1/messages', {
+      timeoutMs: 1000,
+      successStatus: '200',
+      method: 'POST',
+      headers: { 'x-api-key': 'sk-real-token', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: '{"model":"glm-4.6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}',
+      fetchImpl,
+    });
+    expect(r.ok).toBe(true);
+    expect(seenUrl).toBe('https://api.z.ai/api/anthropic/v1/messages');
+    expect(seenInit?.method).toBe('POST');
+    expect(seenInit?.redirect).toBe('follow');
+    expect(seenInit?.headers).toEqual({
+      'x-api-key': 'sk-real-token',
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    });
+    expect(seenInit?.body).toBe(
+      '{"model":"glm-4.6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}',
+    );
+  });
+
+  it('defaults to GET when method omitted, no body sent', async () => {
+    let seenInit: RequestInit | undefined;
+    const fetchImpl = mkFetch(async (_url, init) => {
+      seenInit = init;
+      return mkResponse(200);
+    });
+    await checkOnce('https://z.ai', { timeoutMs: 1000, successStatus: '200-399', fetchImpl });
+    expect(seenInit?.method).toBe('GET');
+    expect(seenInit?.body).toBeUndefined();
+  });
+
+  it('successStatus "200" matches only 200; 429 → ok false', async () => {
+    const ok = mkFetch(async () => mkResponse(200));
+    const rateLimited = mkFetch(async () => mkResponse(429));
+    const r200 = await checkOnce('https://api.z.ai', { timeoutMs: 1000, successStatus: '200', fetchImpl: ok });
+    expect(r200.ok).toBe(true);
+    expect(r200.status).toBe(200);
+    const r429 = await checkOnce('https://api.z.ai', { timeoutMs: 1000, successStatus: '200', fetchImpl: rateLimited });
+    expect(r429.ok).toBe(false);
+    expect(r429.status).toBe(429);
+    expect(r429.error).toMatch(/429/);
+  });
+});
+
+describe('interpolateEnv', () => {
+  it('replaces a single ${VAR} from env', () => {
+    expect(interpolateEnv('${TOKEN}', { TOKEN: 'sk-abc' })).toBe('sk-abc');
+    expect(interpolateEnv('Bearer ${TOKEN}', { TOKEN: 'sk-abc' })).toBe('Bearer sk-abc');
+  });
+
+  it('replaces multiple distinct vars', () => {
+    expect(interpolateEnv('${A}-${B}-${A}', { A: 'x', B: 'y' })).toBe('x-y-x');
+  });
+
+  it('unset var → empty string', () => {
+    expect(interpolateEnv('[${MISSING}]', {})).toBe('[]');
+  });
+
+  it('no-op when there is no ${}', () => {
+    expect(interpolateEnv('plain string', { FOO: 'bar' })).toBe('plain string');
+  });
+
+  it('defaults env to process.env', () => {
+    process.env.__ZAI_WATCH_TEST__ = 'from-process';
+    expect(interpolateEnv('${__ZAI_WATCH_TEST__}')).toBe('from-process');
+    delete process.env.__ZAI_WATCH_TEST__;
   });
 });
