@@ -26,6 +26,7 @@ Monorepo of independent CLI tools, each under `src/<tool>/`, compiled to `dist/<
 | **exec-recursive** | `src/exec-recursive/index.ts` | DFS recursive command execution with depth control |
 | **claude-usage** | `src/claude-usage/index.ts` | Claude API usage reporting |
 | **zai-usage** | `src/zai-usage/index.ts` | Z.ai (Zhipu) Coding Plan usage reporting via HTTP, with Feishu notification |
+| **zai-watch** | `src/zai-watch/index.ts` | Poll a target (default z.ai) until accessible (N consecutive OK probes), then report to Feishu via cc-connect and exit |
 | **claude-task-runner** | `src/claude-task-runner/index.ts` | Automated Claude task execution with Feishu integration |
 | **knowledge-sync** | `src/knowledge-sync/index.ts` | Sync `~/Documents/knowledge` into LLM Wiki sources (`once`); `watch` mode auto-syncs + rescans on change (fs.watch + interval poll, debounced no-overlap runner) |
 
