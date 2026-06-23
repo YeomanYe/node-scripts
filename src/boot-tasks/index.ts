@@ -6,15 +6,19 @@
 // 新增子命令的做法:
 //   1. 在 src/boot-tasks/commands/ 下新建 <name>.ts,导出 register(program: Command)
 //   2. 在下方 SUBCOMMANDS 数组追加 import + register
-//   3. pnpm run build,在 local/pm2.config.js 加一条 app 用 args: '<name>' 启动
+//   3. (可选)如果要随 supervisor 一起跑,在 commands/<name>.ts 里 export 一个
+//      create<Name>Task(opts): SubTask 工厂,并在 commands/serve.ts 的 buildTasks 里加一个分支
+//   4. pnpm run build,在 local/pm2.config.js 调整对应的 app / args
 
 import { Command } from 'commander';
 import { registerAwake } from './commands/awake';
 import { registerLoadEnv } from './commands/load-env';
+import { registerServe } from './commands/serve';
 
 const SUBCOMMANDS: Array<(program: Command) => void> = [
   registerAwake,
   registerLoadEnv,
+  registerServe,
 ];
 
 function main(): void {

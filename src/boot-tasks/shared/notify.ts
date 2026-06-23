@@ -50,6 +50,57 @@ export async function notifyStart(opts: NotifyStartOptions): Promise<void> {
   await sendCard(`▶️ boot-tasks · ${opts.command} 已启动`, lines.join('\n'), 'info');
 }
 
+export interface ServeTaskResult {
+  name: string;
+  status: 'success' | 'failed';
+  summary?: string;
+  error?: string;
+}
+
+export interface NotifyServeStartOptions {
+  tasks: string[];
+  startTime?: Date;
+}
+
+export interface NotifyServeEndOptions {
+  startTime: Date;
+  endTime: Date;
+  status: 'success' | 'failed';
+  taskResults: ServeTaskResult[];
+  stopped: boolean;
+}
+
+export async function notifyServeStart(opts: NotifyServeStartOptions): Promise<void> {
+  const lines = [
+    `**命令**: \`boot-tasks serve\``,
+    `**开始**: ${fmtTime(opts.startTime ?? new Date())}`,
+    `**子任务**: ${opts.tasks.join(', ')}`,
+  ];
+  await sendCard(`▶️ boot-tasks · serve 已启动`, lines.join('\n'), 'info');
+}
+
+export async function notifyServeEnd(opts: NotifyServeEndOptions): Promise<void> {
+  const durationMs = opts.endTime.getTime() - opts.startTime.getTime();
+  const icon = opts.status === 'success' ? '✅' : '❌';
+  const lines = [
+    `**命令**: \`boot-tasks serve\``,
+    `**开始**: ${fmtTime(opts.startTime)}`,
+    `**结束**: ${fmtTime(opts.endTime)}`,
+    `**耗时**: ${fmtDuration(durationMs)}`,
+    `**状态**: ${opts.status}${opts.stopped ? '(信号触发)' : ''}`,
+  ];
+  if (opts.taskResults.length > 0) {
+    lines.push('', '**子任务结果**:');
+    for (const r of opts.taskResults) {
+      const ricon = r.status === 'success' ? '✅' : '❌';
+      const tail = r.error ? ` · \`${r.error}\`` : (r.summary ? ` · ${r.summary}` : '');
+      lines.push(`- ${ricon} ${r.name}${tail}`);
+    }
+  }
+  const level = opts.status === 'success' ? 'info' : 'warn';
+  await sendCard(`${icon} boot-tasks · serve ${opts.status === 'success' ? '完成' : '失败'}`, lines.join('\n'), level);
+}
+
 export async function notifyEnd(opts: NotifyEndOptions): Promise<void> {
   const durationMs = opts.endTime.getTime() - opts.startTime.getTime();
   const icon = opts.status === 'success' ? '✅' : '❌';

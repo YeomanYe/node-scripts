@@ -1,10 +1,11 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { Command } from 'commander';
 import { notifyEnd, notifyStart } from '../shared/notify';
+import type { SubTask, SubTaskContext, SubTaskHandle, SubTaskResult } from '../shared/sub-task';
 
 const CAFFEINATE = '/usr/bin/caffeinate';
 
-interface AwakeOptions {
+export interface AwakeOptions {
   display: boolean;
   idle: boolean;
   disk: boolean;
@@ -22,6 +23,49 @@ function buildArgs(opts: AwakeOptions): string[] {
   return args;
 }
 
+// 把 caffeinate 子进程包装成 SubTask。supervisor 模式下不再发飞书、不再 process.exit,
+// 退出原因由 SubTaskResult 携带,由 supervisor 聚合通知。
+export function createAwakeTask(opts: AwakeOptions): SubTask {
+  return {
+    name: 'awake',
+    kind: 'long-running',
+    async start(ctx: SubTaskContext): Promise<SubTaskHandle> {
+      const args = buildArgs(opts);
+      if (args.length === 0) {
+        throw new Error('awake: 至少需要启用一种保持唤醒模式(-d / -i / -m / -s)');
+      }
+      ctx.log(`[boot-tasks awake] spawn ${CAFFEINATE} ${args.join(' ')}`);
+
+      const child: ChildProcess = spawn(CAFFEINATE, args, { stdio: 'inherit' });
+
+      const promise = new Promise<SubTaskResult>((resolve) => {
+        child.on('exit', (code, signal) => {
+          // 主动 stop 触发的退出 / 信号退出 / exit 0 都算 success;非零 exit 视为失败。
+          if (ctx.stopped || code === 0 || signal) {
+            resolve({
+              status: 'success',
+              summary: signal ? `信号 ${signal}` : `exit code ${code}`,
+            });
+          } else {
+            resolve({ status: 'failed', summary: `exit code ${code}` });
+          }
+        });
+        child.on('error', (err) => {
+          resolve({ status: 'failed', error: `caffeinate spawn 失败: ${err.message}` });
+        });
+      });
+
+      return {
+        promise,
+        stop: () => {
+          if (!child.killed) child.kill('SIGTERM');
+        },
+      };
+    },
+  };
+}
+
+// 独立 `boot-tasks awake` 子命令:走原有的 notify + process.exit 路径(向后兼容)。
 async function runAwake(opts: AwakeOptions): Promise<void> {
   const args = buildArgs(opts);
   if (args.length === 0) {

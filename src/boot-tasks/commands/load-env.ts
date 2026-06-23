@@ -4,9 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import { runOneShotWithNotify } from '../shared/notify';
+import type { SubTask, SubTaskContext, SubTaskHandle, SubTaskResult } from '../shared/sub-task';
 
-interface LoadEnvOptions {
-  envFile?: string;
+export interface LoadEnvOptions {
+  envPath?: string;
   mode: 'both' | 'launchctl' | 'zshrc';
   zshrcPath: string;
   dryRun: boolean;
@@ -100,11 +101,11 @@ function updateZshrc(entries: ParsedEntry[], zshrcPath: string): 'replaced' | 'a
 }
 
 async function runLoadEnv(opts: LoadEnvOptions): Promise<{ summary: string }> {
-  if (!opts.envFile) {
-    throw new Error('必须提供 --env-file <path>(指向 .env 文件)');
+  if (!opts.envPath) {
+    throw new Error('必须提供 --env-path <path>(指向 .env 文件)');
   }
 
-  const envPath = path.resolve(opts.envFile.replace(/^~/, os.homedir()));
+  const envPath = path.resolve(opts.envPath.replace(/^~/, os.homedir()));
   if (!fs.existsSync(envPath)) {
     throw new Error(`.env 文件不存在: ${envPath}`);
   }
@@ -152,11 +153,35 @@ async function runLoadEnv(opts: LoadEnvOptions): Promise<{ summary: string }> {
   return { summary: summaryLines.join('\n') };
 }
 
+// 包装 runLoadEnv 成 SubTask。supervisor 模式下不发飞书、不 process.exit。
+// runLoadEnv 内部已经返回 summary,这里只搬运结果与异常。
+export function createLoadEnvTask(opts: LoadEnvOptions): SubTask {
+  return {
+    name: 'load-env',
+    kind: 'one-shot',
+    async start(ctx: SubTaskContext): Promise<SubTaskHandle> {
+      const promise = (async (): Promise<SubTaskResult> => {
+        if (ctx.stopped) {
+          return { status: 'success', summary: '启动前 supervisor 已停止,跳过' };
+        }
+        try {
+          const result = await runLoadEnv(opts);
+          return { status: 'success', summary: result.summary };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { status: 'failed', error: message };
+        }
+      })();
+      return { promise };
+    },
+  };
+}
+
 export function registerLoadEnv(program: Command): void {
   program
     .command('load-env')
     .description('读取 .env 文件,把变量注入到 launchctl 和/或 ~/.zshrc(GUI + terminal 都生效)')
-    .option('-f, --env-file <path>', '.env 文件路径(支持 ~)')
+    .option('-f, --env-path <path>', '.env 文件路径(支持 ~)')
     .option('-m, --mode <mode>', '注入模式: launchctl | zshrc | both', 'both')
     .option('--zshrc-path <path>', 'zshrc mode 写入路径(用 marker block 替换)', '~/.zshrc')
     .option('--dry-run', '只解析不写入', false)
