@@ -55,6 +55,157 @@ export function interpolateEnv(value: string, env: NodeJS.ProcessEnv = process.e
   return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => env[name] ?? '');
 }
 
+// ───────────────────────── 模型列表解析 / 最新旗舰挑选 ─────────────────────────
+
+/** 默认的「旗舰」正则:纯版本号 id(如 glm-4.6 / glm-5 / glm-5.2),不含 -air/-turbo/letters 后缀。 */
+export const DEFAULT_FLAGSHIP_PATTERN = '^glm-\\d+(\\.\\d+)*$';
+
+/** 默认 models 列表端点(当无法从 probe url 推导时)。 */
+export const DEFAULT_MODELS_URL = 'https://api.z.ai/api/anthropic/v1/models';
+
+/** 兼容两种返回形态的单条模型记录。 */
+interface RawModelEntry {
+  id?: unknown;
+  /** Anthropic 形态:ISO 字符串。 */
+  created_at?: unknown;
+  /** OpenAI-compat 形态:epoch 秒。 */
+  created?: unknown;
+}
+
+/** models 列表返回体(两种形态共用 data 数组)。 */
+interface ModelsJson {
+  data?: RawModelEntry[];
+}
+
+/** 规整后的模型:id + 归一化时间戳(ms)。 */
+interface NormalizedModel {
+  id: string;
+  ts: number;
+}
+
+/** 把单条记录归一化为 { id, ts(ms) };无法识别 id 或时间 → null。 */
+function normalizeModelEntry(entry: RawModelEntry): NormalizedModel | null {
+  if (typeof entry.id !== 'string' || entry.id.length === 0) return null;
+  let ts = NaN;
+  if (typeof entry.created_at === 'string') {
+    ts = Date.parse(entry.created_at);
+  } else if (typeof entry.created === 'number' && Number.isFinite(entry.created)) {
+    ts = entry.created * 1000;
+  }
+  if (!Number.isFinite(ts)) ts = 0;
+  return { id: entry.id, ts };
+}
+
+/**
+ * 纯函数:从 models 列表返回体中挑出「最新旗舰」模型 id。
+ * - 兼容 data[].{id, created_at}(ISO 字符串)与 data[].{id, created}(epoch 秒)。
+ * - 先按 flagshipPattern 过滤,取 ts 最大者;若无任何旗舰匹配,则在全部模型里取 ts 最大者兜底。
+ * - 列表为空 → 返回 null。
+ */
+export function pickLatestFlagshipModel(
+  modelsJson: ModelsJson | null | undefined,
+  opts: { flagshipPattern?: string } = {},
+): string | null {
+  const data = modelsJson?.data;
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  const normalized: NormalizedModel[] = [];
+  for (const entry of data) {
+    const n = normalizeModelEntry(entry);
+    if (n) normalized.push(n);
+  }
+  if (normalized.length === 0) return null;
+
+  const pattern = opts.flagshipPattern ?? DEFAULT_FLAGSHIP_PATTERN;
+  const re = new RegExp(pattern);
+
+  const maxBy = (list: NormalizedModel[]): string | null => {
+    let best: NormalizedModel | null = null;
+    for (const m of list) {
+      if (best === null || m.ts > best.ts) best = m;
+    }
+    return best ? best.id : null;
+  };
+
+  const flagship = normalized.filter((m) => re.test(m.id));
+  if (flagship.length > 0) return maxBy(flagship);
+  // 无旗舰匹配 → 全量 ts 最大者兜底。
+  return maxBy(normalized);
+}
+
+/** 从 probe url 推导 models 端点:末尾 /messages → /models;否则用默认端点。 */
+export function deriveModelsUrl(probeUrl: string): string {
+  if (/\/messages$/.test(probeUrl)) return probeUrl.replace(/\/messages$/, '/models');
+  return DEFAULT_MODELS_URL;
+}
+
+export interface ResolveLatestModelOptions {
+  timeoutMs: number;
+  headers?: Record<string, string>;
+  flagshipPattern?: string;
+  fetchImpl?: typeof fetch;
+}
+
+export interface ResolveLatestModelResult {
+  model: string | null;
+  error?: string;
+}
+
+/**
+ * 联网解析最新旗舰模型:GET modelsUrl(带同款鉴权 headers),解析 JSON,挑最新旗舰。
+ * GET 失败(网络/非 2xx/解析失败)→ { model:null, error:"models list unavailable: …" }。
+ * 列表为空/无可用 → { model:null }(由上层判为 "no model found")。绝不抛出。
+ */
+export async function resolveLatestModel(
+  modelsUrl: string,
+  opts: ResolveLatestModelOptions,
+): Promise<ResolveLatestModelResult> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  try {
+    const init: RequestInit = { method: 'GET', redirect: 'follow', signal: controller.signal };
+    if (opts.headers) init.headers = opts.headers;
+    const res = await fetchImpl(modelsUrl, init);
+    if (res.status < 200 || res.status >= 300) {
+      return { model: null, error: `models list unavailable: HTTP ${res.status}` };
+    }
+    let json: ModelsJson;
+    try {
+      json = (await res.json()) as ModelsJson;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { model: null, error: `models list unavailable: 解析失败 (${msg})` };
+    }
+    const model = pickLatestFlagshipModel(json, { flagshipPattern: opts.flagshipPattern });
+    return { model };
+  } catch (err) {
+    const isAbort = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message));
+    const msg = isAbort ? `超时(${opts.timeoutMs}ms)` : err instanceof Error ? err.message : String(err);
+    return { model: null, error: `models list unavailable: ${msg}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 纯函数:把 body(JSON 字符串)里的 .model 覆写为 resolvedModel 后重新序列化。
+ * body 解析失败或非对象 → 退化为 {"model": resolvedModel}(确保请求带上目标模型)。
+ */
+export function injectModelIntoBody(body: string | undefined, resolvedModel: string): string {
+  let parsed: unknown;
+  try {
+    parsed = body !== undefined ? JSON.parse(body) : {};
+  } catch {
+    parsed = {};
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    parsed = {};
+  }
+  (parsed as Record<string, unknown>).model = resolvedModel;
+  return JSON.stringify(parsed);
+}
+
 export interface CheckOptions {
   timeoutMs: number;
   successStatus: string;

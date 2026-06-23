@@ -1,4 +1,14 @@
-import { parseStatusSpec, statusMatches, checkOnce, interpolateEnv } from '../../src/zai-watch/check';
+import {
+  parseStatusSpec,
+  statusMatches,
+  checkOnce,
+  interpolateEnv,
+  pickLatestFlagshipModel,
+  injectModelIntoBody,
+  deriveModelsUrl,
+  resolveLatestModel,
+  DEFAULT_MODELS_URL,
+} from '../../src/zai-watch/check';
 
 describe('parseStatusSpec / statusMatches', () => {
   it('matches a single status', () => {
@@ -196,6 +206,154 @@ describe('checkOnce (injected fetch)', () => {
     expect(r429.ok).toBe(false);
     expect(r429.status).toBe(429);
     expect(r429.error).toMatch(/429/);
+  });
+});
+
+describe('pickLatestFlagshipModel', () => {
+  it('picks newest flagship from a mixed list (Anthropic shape, created_at ISO)', () => {
+    const json = {
+      data: [
+        { id: 'glm-4.6', created_at: '2025-10-01T08:00:00Z', type: 'model' },
+        { id: 'glm-5-turbo', created_at: '2026-05-01T08:00:00Z', type: 'model' },
+        { id: 'glm-5.2-air', created_at: '2026-06-10T08:00:00Z', type: 'model' },
+        { id: 'glm-5.2', created_at: '2026-06-01T08:00:00Z', type: 'model' },
+      ],
+    };
+    expect(pickLatestFlagshipModel(json)).toBe('glm-5.2');
+  });
+
+  it('picks newest flagship from OpenAI-compat shape (created epoch seconds)', () => {
+    const json = {
+      data: [
+        { id: 'glm-4.6', created: 1759305600, owned_by: 'z-ai' }, // 2025-10-01
+        { id: 'glm-5.1', created: 1778832000, owned_by: 'z-ai' }, // 2026-05-15
+        { id: 'glm-5.2', created: 1781625600, owned_by: 'z-ai' }, // 2026-06-16
+        { id: 'glm-5-turbo', created: 1782000000, owned_by: 'z-ai' }, // newer but variant
+      ],
+    };
+    expect(pickLatestFlagshipModel(json)).toBe('glm-5.2');
+  });
+
+  it('respects a custom flagshipPattern', () => {
+    const json = {
+      data: [
+        { id: 'glm-5.2', created_at: '2026-06-01T00:00:00Z' },
+        { id: 'glm-4.6', created_at: '2025-10-01T00:00:00Z' },
+      ],
+    };
+    // pattern that only matches glm-4.x → picks glm-4.6 even though 5.2 is newer
+    expect(pickLatestFlagshipModel(json, { flagshipPattern: '^glm-4(\\.\\d+)?$' })).toBe('glm-4.6');
+  });
+
+  it('falls back to max-ts overall when no flagship matches', () => {
+    const json = {
+      data: [
+        { id: 'glm-4.5-air', created_at: '2025-09-01T00:00:00Z' },
+        { id: 'glm-5-turbo', created_at: '2026-06-01T00:00:00Z' },
+      ],
+    };
+    expect(pickLatestFlagshipModel(json)).toBe('glm-5-turbo');
+  });
+
+  it('returns null on empty / missing data', () => {
+    expect(pickLatestFlagshipModel({ data: [] })).toBeNull();
+    expect(pickLatestFlagshipModel({})).toBeNull();
+    expect(pickLatestFlagshipModel(null)).toBeNull();
+    expect(pickLatestFlagshipModel(undefined)).toBeNull();
+  });
+
+  it('ignores entries without a usable id', () => {
+    const json = { data: [{ created_at: '2026-06-01T00:00:00Z' }, { id: 'glm-5', created_at: '2026-01-01T00:00:00Z' }] };
+    expect(pickLatestFlagshipModel(json)).toBe('glm-5');
+  });
+});
+
+describe('injectModelIntoBody', () => {
+  it('overwrites .model in an existing JSON body', () => {
+    const out = injectModelIntoBody('{"model":"glm-4.6","max_tokens":1}', 'glm-5.2');
+    expect(JSON.parse(out)).toEqual({ model: 'glm-5.2', max_tokens: 1 });
+  });
+
+  it('adds .model when body has no model key', () => {
+    const out = injectModelIntoBody('{"max_tokens":1}', 'glm-5.2');
+    expect(JSON.parse(out)).toEqual({ max_tokens: 1, model: 'glm-5.2' });
+  });
+
+  it('degrades to {model} on undefined / invalid body', () => {
+    expect(JSON.parse(injectModelIntoBody(undefined, 'glm-5.2'))).toEqual({ model: 'glm-5.2' });
+    expect(JSON.parse(injectModelIntoBody('not json', 'glm-5.2'))).toEqual({ model: 'glm-5.2' });
+    expect(JSON.parse(injectModelIntoBody('[1,2]', 'glm-5.2'))).toEqual({ model: 'glm-5.2' });
+  });
+});
+
+describe('deriveModelsUrl', () => {
+  it('replaces a trailing /messages with /models', () => {
+    expect(deriveModelsUrl('https://api.z.ai/api/anthropic/v1/messages')).toBe(
+      'https://api.z.ai/api/anthropic/v1/models',
+    );
+  });
+
+  it('falls back to default when url does not end in /messages', () => {
+    expect(deriveModelsUrl('https://api.z.ai/foo')).toBe(DEFAULT_MODELS_URL);
+  });
+});
+
+describe('resolveLatestModel (injected fetch)', () => {
+  const mkFetch = (impl: (url: string, init?: RequestInit) => Promise<Response>) =>
+    impl as unknown as typeof fetch;
+  const mkJson = (status: number, json: unknown): Response =>
+    ({ status, json: async () => json } as unknown as Response);
+
+  it('resolves the newest flagship on 200', async () => {
+    const fetchImpl = mkFetch(async () =>
+      mkJson(200, {
+        data: [
+          { id: 'glm-4.6', created_at: '2025-10-01T08:00:00Z' },
+          { id: 'glm-5.2', created_at: '2026-06-01T08:00:00Z' },
+        ],
+      }),
+    );
+    const r = await resolveLatestModel('https://api.z.ai/api/anthropic/v1/models', { timeoutMs: 1000, fetchImpl });
+    expect(r.model).toBe('glm-5.2');
+    expect(r.error).toBeUndefined();
+  });
+
+  it('non-2xx → models list unavailable error, model null', async () => {
+    const fetchImpl = mkFetch(async () => mkJson(503, {}));
+    const r = await resolveLatestModel('https://api.z.ai/api/anthropic/v1/models', { timeoutMs: 1000, fetchImpl });
+    expect(r.model).toBeNull();
+    expect(r.error).toMatch(/models list unavailable/);
+  });
+
+  it('network error → models list unavailable error', async () => {
+    const fetchImpl = mkFetch(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+    const r = await resolveLatestModel('https://api.z.ai/api/anthropic/v1/models', { timeoutMs: 1000, fetchImpl });
+    expect(r.model).toBeNull();
+    expect(r.error).toMatch(/models list unavailable/);
+  });
+
+  it('empty list → model null, no error', async () => {
+    const fetchImpl = mkFetch(async () => mkJson(200, { data: [] }));
+    const r = await resolveLatestModel('https://api.z.ai/api/anthropic/v1/models', { timeoutMs: 1000, fetchImpl });
+    expect(r.model).toBeNull();
+    expect(r.error).toBeUndefined();
+  });
+
+  it('passes auth headers through to the GET', async () => {
+    let seenInit: RequestInit | undefined;
+    const fetchImpl = mkFetch(async (_url, init) => {
+      seenInit = init;
+      return mkJson(200, { data: [{ id: 'glm-5', created_at: '2026-01-01T00:00:00Z' }] });
+    });
+    await resolveLatestModel('https://api.z.ai/api/anthropic/v1/models', {
+      timeoutMs: 1000,
+      headers: { 'x-api-key': 'sk-real', 'anthropic-version': '2023-06-01' },
+      fetchImpl,
+    });
+    expect(seenInit?.method).toBe('GET');
+    expect(seenInit?.headers).toEqual({ 'x-api-key': 'sk-real', 'anthropic-version': '2023-06-01' });
   });
 });
 
