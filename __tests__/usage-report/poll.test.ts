@@ -6,7 +6,6 @@ const PROVIDERS: ProviderOverrides = {
   claude: { windows: ['five_hour', 'seven_day'] },
   codex: { windows: ['primary', 'secondary'] },
   minimax: { windows: ['interval', 'weekly'] },
-  zai: { windows: ['primary', 'secondary'] },
 };
 
 const CONFIG: AggregateConfig = {
@@ -43,9 +42,7 @@ describe('runOnce', () => {
         fetchers: {
           claude: async () => ({ title: 'c', content: 'claude', level: 'info', summaryLine: 'c-ok' }),
           codex: async () => ({ title: 'c', content: 'codex', level: 'info', summaryLine: 'co-ok' }),
-          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),
-          zai: async () => ({ title: 'c', content: 'zai', level: 'info', summaryLine: 'z-ok' }),
-        },
+          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),        },
       },
     });
     expect(good.calls).toHaveLength(1);
@@ -64,9 +61,7 @@ describe('runOnce', () => {
         fetchers: {
           claude: async () => ({ title: 'c', content: 'claude', level: 'warn', summaryLine: 'c-warn' }),
           codex: async () => ({ title: 'c', content: 'codex', level: 'info', summaryLine: 'co-ok' }),
-          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),
-          zai: async () => ({ title: 'c', content: 'zai', level: 'info', summaryLine: 'z-ok' }),
-        },
+          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),        },
       },
     });
     expect(good.calls[0].level).toBe('warn');
@@ -84,9 +79,7 @@ describe('runOnce', () => {
         fetchers: {
           claude: async () => { throw new Error('keychain 不可用'); },
           codex: async () => ({ title: 'c', content: 'codex', level: 'info', summaryLine: 'co-ok' }),
-          minimax: async () => { throw new Error('401'); },
-          zai: async () => ({ title: 'c', content: 'zai', level: 'info', summaryLine: 'z-ok' }),
-        },
+          minimax: async () => { throw new Error('401'); },        },
       },
     });
     expect(good.calls).toHaveLength(1);
@@ -107,9 +100,7 @@ describe('runOnce', () => {
         fetchers: {
           claude: async () => ({ title: 'c', content: 'claude', level: 'info', summaryLine: 'c-ok' }),
           codex: async () => ({ title: 'c', content: 'codex', level: 'info', summaryLine: 'co-ok' }),
-          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),
-          zai: async () => ({ title: 'c', content: 'zai', level: 'info', summaryLine: 'z-ok' }),
-        },
+          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),        },
       },
     });
     expect(good.calls).toHaveLength(1);
@@ -128,9 +119,7 @@ describe('runOnce', () => {
         fetchers: {
           claude: async () => ({ title: 'c', content: 'claude', level: 'info', summaryLine: 'c-ok' }),
           codex: async () => { throw new Error('401'); },
-          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),
-          zai: async () => ({ title: 'c', content: 'zai', level: 'info', summaryLine: 'z-ok' }),
-        },
+          minimax: async () => ({ title: 'c', content: 'mm', level: 'info', summaryLine: 'mm-ok' }),        },
       },
     });
     expect(logs[0]).toContain('claude=c-ok');

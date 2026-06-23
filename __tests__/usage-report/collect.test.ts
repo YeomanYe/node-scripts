@@ -6,7 +6,6 @@ const PROVIDERS: ProviderOverrides = {
   claude: { windows: ['five_hour', 'seven_day'] },
   codex: { windows: ['primary', 'secondary'] },
   minimax: { windows: ['interval', 'weekly'] },
-  zai: { windows: ['primary', 'secondary'] },
 };
 
 function report(key: string): PollReportLike {
@@ -14,21 +13,20 @@ function report(key: string): PollReportLike {
 }
 
 describe('collectAllReports', () => {
-  it('并行触发 4 个 fetcher，结果顺序固定为 [claude, codex, minimax, zai]', async () => {
+  it('并行触发 3 个 fetcher，结果顺序固定为 [claude, codex, minimax]', async () => {
     const calls: string[] = [];
     const fetchers = {
       claude: async () => { calls.push('claude'); return report('claude'); },
       codex: async () => { calls.push('codex'); return report('codex'); },
       minimax: async () => { calls.push('minimax'); return report('minimax'); },
-      zai: async () => { calls.push('zai'); return report('zai'); },
     };
     const results = await collectAllReports({ providers: PROVIDERS, nowMs: 0, fetchers });
-    expect(calls).toEqual(expect.arrayContaining(['claude', 'codex', 'minimax', 'zai']));
-    expect(results.map((r) => r.key)).toEqual(['claude', 'codex', 'minimax', 'zai']);
+    expect(calls).toEqual(expect.arrayContaining(['claude', 'codex', 'minimax']));
+    expect(results.map((r) => r.key)).toEqual(['claude', 'codex', 'minimax']);
     expect(results.every((r) => r.status === 'ok')).toBe(true);
   });
 
-  it('单个 provider reject 不致命：claude 失败，其余 3 个仍 ok', async () => {
+  it('单个 provider reject 不致命：claude 失败，其余 2 个仍 ok', async () => {
     const results = await collectAllReports({
       providers: PROVIDERS,
       nowMs: 0,
@@ -36,14 +34,12 @@ describe('collectAllReports', () => {
         claude: async () => { throw new Error('keychain 不可用'); },
         codex: async () => report('codex'),
         minimax: async () => report('minimax'),
-        zai: async () => report('zai'),
       },
     });
-    expect(results).toHaveLength(4);
+    expect(results).toHaveLength(3);
     expect(results[0]).toEqual({ status: 'error', key: 'claude', message: 'keychain 不可用' });
     expect(results[1].status).toBe('ok');
     expect(results[2].status).toBe('ok');
-    expect(results[3].status).toBe('ok');
   });
 
   it('多个 provider 同时 reject：各自 error message 都保留', async () => {
@@ -53,14 +49,12 @@ describe('collectAllReports', () => {
       fetchers: {
         claude: async () => report('claude'),
         codex: async () => { throw new Error('401 未授权'); },
-        minimax: async () => report('minimax'),
-        zai: async () => { throw new Error('网络超时'); },
+        minimax: async () => { throw new Error('网络超时'); },
       },
     });
     expect(results[1]).toEqual({ status: 'error', key: 'codex', message: '401 未授权' });
-    expect(results[3]).toEqual({ status: 'error', key: 'zai', message: '网络超时' });
+    expect(results[2]).toEqual({ status: 'error', key: 'minimax', message: '网络超时' });
     expect(results[0].status).toBe('ok');
-    expect(results[2].status).toBe('ok');
   });
 
   it('非 Error 的 reject 原因也能转成 message 字符串', async () => {
@@ -71,7 +65,6 @@ describe('collectAllReports', () => {
         claude: async () => report('claude'),
         codex: async () => { throw 'string reason'; },
         minimax: async () => report('minimax'),
-        zai: async () => report('zai'),
       },
     });
     expect(results[1]).toEqual({ status: 'error', key: 'codex', message: 'string reason' });
@@ -85,7 +78,6 @@ describe('collectAllReports', () => {
         claude: async () => ({ title: 'T', content: 'C', level: 'warn' as const, summaryLine: 'S' }),
         codex: async () => report('codex'),
         minimax: async () => report('minimax'),
-        zai: async () => report('zai'),
       },
     });
     const claude = results[0];
@@ -103,10 +95,9 @@ describe('collectAllReports', () => {
         claude: async () => report('claude'),
         codex: async () => report('codex'),
         minimax: async () => report('minimax'),
-        zai: async () => report('zai'),
       },
     });
-    expect(results).toHaveLength(4);
+    expect(results).toHaveLength(3);
     // 类型层面已校验为 ProviderResult[]
     results.forEach((r) => {
       expect(['ok', 'error']).toContain(r.status);

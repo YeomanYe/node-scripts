@@ -22,7 +22,6 @@
     "skillshare-sync-notify": "dist/skillshare-sync-notify/index.js",
     "system-status": "dist/system-status/index.js",
     "knowledge-sync": "dist/knowledge-sync/index.js",
-    "zai-usage": "dist/zai-usage/index.js",
     "zai-watch": "dist/zai-watch/index.js",
     "usage-report": "dist/usage-report/index.js"
   },
