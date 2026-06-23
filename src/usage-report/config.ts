@@ -4,8 +4,11 @@ import YAML from 'yaml';
 import { ClaudeAlertWindow } from '../claude-usage/config';
 import { CodexAlertWindow } from '../codex-usage/config';
 import { MiniMaxAlertWindow } from '../minimax-usage/config';
+import { ZaiAlertWindow } from '../zai-usage/config';
 import { DEFAULT_ENV_FILE as MM_DEFAULT_ENV_FILE, DEFAULT_API_KEY_ENV as MM_DEFAULT_API_KEY_ENV } from '../minimax-usage/env';
+import { DEFAULT_ENV_FILE as ZAI_DEFAULT_ENV_FILE, DEFAULT_API_KEY_ENV as ZAI_DEFAULT_API_KEY_ENV } from '../zai-usage/env';
 import { DEFAULT_MINIMAX_HOST } from '../minimax-usage/quota';
+import { DEFAULT_ZAI_HOST } from '../zai-usage/quota';
 import { getDefaultAuthPath } from '../codex-usage/auth';
 import { ChannelConfig } from '../shared/notifiers/types';
 import { AggregateConfig, ProviderOverrides } from './types';
@@ -13,6 +16,7 @@ import { AggregateConfig, ProviderOverrides } from './types';
 const VALID_CLAUDE_WINDOWS: readonly ClaudeAlertWindow[] = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus'];
 const VALID_CODEX_WINDOWS: readonly CodexAlertWindow[] = ['primary', 'secondary'];
 const VALID_MINIMAX_WINDOWS: readonly MiniMaxAlertWindow[] = ['interval', 'weekly'];
+const VALID_ZAI_WINDOWS: readonly ZaiAlertWindow[] = ['primary', 'secondary'];
 
 const DEFAULTS: AggregateConfig = {
   poll: { interval_seconds: 300 },
@@ -21,6 +25,7 @@ const DEFAULTS: AggregateConfig = {
     claude: { windows: ['five_hour', 'seven_day'] },
     codex: { windows: ['primary', 'secondary'] },
     minimax: { windows: ['interval', 'weekly'] },
+    zai: { windows: ['primary', 'secondary'] },
   },
 };
 
@@ -68,6 +73,7 @@ function validateProviders(raw: unknown): ProviderOverrides {
   const claudeRaw = obj['claude'] ?? {};
   const codexRaw = obj['codex'] ?? {};
   const minimaxRaw = obj['minimax'] ?? {};
+  const zaiRaw = obj['zai'] ?? {};
 
   return {
     claude: { windows: validateWindows(claudeRaw['windows'], VALID_CLAUDE_WINDOWS, 'claude', DEFAULTS.providers.claude.windows) },
@@ -81,6 +87,12 @@ function validateProviders(raw: unknown): ProviderOverrides {
       envFile: optString(minimaxRaw, 'env_file') ?? MM_DEFAULT_ENV_FILE,
       apiKeyEnv: optString(minimaxRaw, 'api_key_env') ?? MM_DEFAULT_API_KEY_ENV,
       apiHost: optString(minimaxRaw, 'api_host') ?? DEFAULT_MINIMAX_HOST,
+    },
+    zai: {
+      windows: validateWindows(zaiRaw['windows'], VALID_ZAI_WINDOWS, 'zai', DEFAULTS.providers.zai.windows),
+      envFile: optString(zaiRaw, 'env_file') ?? ZAI_DEFAULT_ENV_FILE,
+      apiKeyEnv: optString(zaiRaw, 'api_key_env') ?? ZAI_DEFAULT_API_KEY_ENV,
+      apiHost: optString(zaiRaw, 'api_host') ?? DEFAULT_ZAI_HOST,
     },
   };
 }

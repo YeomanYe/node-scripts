@@ -5,6 +5,7 @@ export const PROVIDER_DISPLAY: Record<ProviderKey, { emoji: string; label: strin
   claude: { emoji: '🟦', label: 'Claude' },
   codex: { emoji: '🟩', label: 'Codex' },
   minimax: { emoji: '🟪', label: 'MiniMax' },
+  zai: { emoji: '🟧', label: 'Z.ai' },
 };
 
 /** 把 epoch ms 格式化为本地时间字符串 YYYY-MM-DD HH:mm:ss */
@@ -18,11 +19,11 @@ export function formatLocalTime(ms: number): string {
 }
 
 /**
- * 把 3 个 provider 的结果拼成一张飞书卡片的 {title, content, level, summaryLine}。
+ * 把 4 个 provider 的结果拼成一张飞书卡片的 {title, content, level, summaryLine}。
  * 纯函数，无副作用。
  *
  * - level：任一「成功且 warn」的 provider 触发整体 warn（红 header）；失败的 provider 不计入
- * - content：顶部时间戳 header + 3 个 provider 分块（块间用 lark_md 分隔线 ---）
+ * - content：顶部时间戳 header + 4 个 provider 分块（块间用 lark_md 分隔线 ---）
  * - 失败的 provider 块显示「⚠️ 获取失败：<message>」
  */
 export function buildAggregateCard(results: ProviderResult[], opts: { nowMs: number }): AggregateCard {

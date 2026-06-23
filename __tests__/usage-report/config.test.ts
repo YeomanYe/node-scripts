@@ -26,6 +26,8 @@ providers:
     windows: [primary, secondary]
   minimax:
     windows: [interval, weekly]
+  zai:
+    windows: [primary, secondary]
 `;
 
 describe('loadPollConfig', () => {
@@ -38,6 +40,7 @@ describe('loadPollConfig', () => {
     expect(cfg.providers.claude.windows).toEqual(['five_hour', 'seven_day']);
     expect(cfg.providers.codex.windows).toEqual(['primary', 'secondary']);
     expect(cfg.providers.minimax.windows).toEqual(['interval', 'weekly']);
+    expect(cfg.providers.zai.windows).toEqual(['primary', 'secondary']);
   });
 
   it('省略某 provider 时其 windows 回退到该 provider 默认值', async () => {
@@ -57,6 +60,7 @@ providers:
     // 其余回退默认
     expect(cfg.providers.codex.windows).toEqual(['primary', 'secondary']);
     expect(cfg.providers.minimax.windows).toEqual(['interval', 'weekly']);
+    expect(cfg.providers.zai.windows).toEqual(['primary', 'secondary']);
   });
 
   it('完全省略 providers 时全部回退默认', async () => {
@@ -147,6 +151,10 @@ providers:
     env_file: /tmp/.env
     api_key_env: MM_KEY
     api_host: https://mm.example.com
+  zai:
+    env_file: /tmp/.env
+    api_key_env: Z_KEY
+    api_host: https://zai.example.com
 `);
     const cfg = await loadPollConfig(file);
     expect(cfg.providers.codex.authFile).toBe('/tmp/auth.json');
@@ -154,5 +162,6 @@ providers:
     expect(cfg.providers.minimax.envFile).toBe('/tmp/.env');
     expect(cfg.providers.minimax.apiKeyEnv).toBe('MM_KEY');
     expect(cfg.providers.minimax.apiHost).toBe('https://mm.example.com');
+    expect(cfg.providers.zai.apiHost).toBe('https://zai.example.com');
   });
 });

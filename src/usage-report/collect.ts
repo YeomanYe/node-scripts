@@ -7,6 +7,9 @@ import { buildPollReport as buildCodexReport } from '../codex-usage/poll';
 import { readMiniMaxApiKey } from '../minimax-usage/env';
 import { fetchMiniMaxQuota } from '../minimax-usage/quota';
 import { buildPollReport as buildMiniMaxReport } from '../minimax-usage/poll';
+import { readZaiApiKey } from '../zai-usage/env';
+import { fetchZaiUsage } from '../zai-usage/quota';
+import { buildPollReport as buildZaiReport } from '../zai-usage/poll';
 import { PollReportLike, ProviderKey, ProviderOverrides, ProviderResult } from './types';
 
 /** 测试可注入的 fetcher：返回该 provider 的已构造 PollReport */
@@ -22,7 +25,7 @@ export interface CollectOptions {
 }
 
 /** 卡片自上而下的固定顺序 */
-const PROVIDER_ORDER: ProviderKey[] = ['claude', 'codex', 'minimax'];
+const PROVIDER_ORDER: ProviderKey[] = ['claude', 'codex', 'minimax', 'zai'];
 
 /** Claude：读 keychain → fetchUsage → buildPollReport（多 subscription/tier 入参） */
 async function defaultClaudeThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
@@ -57,15 +60,26 @@ async function defaultMiniMaxThunk(providers: ProviderOverrides, nowMs: number):
   return buildMiniMaxReport(snapshot, { windows: providers.minimax.windows, nowMs });
 }
 
+/** Z.ai：读 .env → fetchZaiUsage → buildPollReport */
+async function defaultZaiThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
+  const apiKey = await readZaiApiKey({
+    envFile: providers.zai.envFile ?? '',
+    apiKeyEnv: providers.zai.apiKeyEnv ?? '',
+  });
+  const snapshot = await fetchZaiUsage({ apiKey, apiHost: providers.zai.apiHost });
+  return buildZaiReport(snapshot, { windows: providers.zai.windows, nowMs });
+}
+
 /**
- * 并行跑 3 个 provider 的「读凭证→fetch→buildPollReport」，单个失败不致命。
- * 用 Promise.allSettled 容错，返回顺序固定为 [claude, codex, minimax]。
+ * 并行跑 4 个 provider 的「读凭证→fetch→buildPollReport」，单个失败不致命。
+ * 用 Promise.allSettled 容错，返回顺序固定为 [claude, codex, minimax, zai]。
  */
 export async function collectAllReports(options: CollectOptions): Promise<ProviderResult[]> {
   const tasks: Record<ProviderKey, ProviderFetcher> = {
     claude: options.fetchers?.claude ?? (() => defaultClaudeThunk(options.providers, options.nowMs)),
     codex: options.fetchers?.codex ?? (() => defaultCodexThunk(options.providers, options.nowMs)),
     minimax: options.fetchers?.minimax ?? (() => defaultMiniMaxThunk(options.providers, options.nowMs)),
+    zai: options.fetchers?.zai ?? (() => defaultZaiThunk(options.providers, options.nowMs)),
   };
 
   const settled = await Promise.allSettled(PROVIDER_ORDER.map((key) => tasks[key]()));

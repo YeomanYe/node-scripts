@@ -1,13 +1,14 @@
 import { ClaudeAlertWindow } from '../claude-usage/config';
 import { CodexAlertWindow } from '../codex-usage/config';
 import { MiniMaxAlertWindow } from '../minimax-usage/config';
+import { ZaiAlertWindow } from '../zai-usage/config';
 import { ChannelConfig } from '../shared/notifiers/types';
 
-/** 聚合的三个用量 provider */
-export type ProviderKey = 'claude' | 'codex' | 'minimax';
+/** 聚合的四个用量 provider */
+export type ProviderKey = 'claude' | 'codex' | 'minimax' | 'zai';
 
 /**
- * 收窄 3 个 provider 各自的 PollReport 到统一字段。
+ * 收窄 4 个 provider 各自的 PollReport 到统一字段。
  * 各 provider 的 PollReport 都 extends NotifierMessage 且带 summaryLine，
  * 但 alerts 字段的泛型各异，聚合阶段只关心 title/content/level/summaryLine。
  */
@@ -46,6 +47,12 @@ export interface ProviderOverrides {
   codex: { windows: CodexAlertWindow[]; authFile?: string; baseUrl?: string };
   minimax: {
     windows: MiniMaxAlertWindow[];
+    envFile?: string;
+    apiKeyEnv?: string;
+    apiHost?: string;
+  };
+  zai: {
+    windows: ZaiAlertWindow[];
     envFile?: string;
     apiKeyEnv?: string;
     apiHost?: string;
