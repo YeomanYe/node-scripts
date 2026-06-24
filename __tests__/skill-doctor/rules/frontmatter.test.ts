@@ -1,5 +1,9 @@
 import * as path from 'path';
-import { frontmatterRule } from '../../../src/skill-doctor/rules/frontmatter';
+import {
+  frontmatterRule,
+  DESCRIPTION_WARN,
+  DESCRIPTION_ERROR,
+} from '../../../src/skill-doctor/rules/frontmatter';
 import type { RuleContext } from '../../../src/skill-doctor/types';
 import { findSkillMds } from '../../../src/skill-doctor/utils/walk';
 
@@ -27,16 +31,30 @@ describe('frontmatter rule', () => {
     expect(findings.some((f) => f.skill === 'no-name' && f.level === 'error' && f.message.includes('name'))).toBe(true);
   });
 
-  it('warns on description > 250 chars (soft limit)', async () => {
+  it(`warns on description > ${DESCRIPTION_WARN} chars (soft limit)`, async () => {
     const ctx = await buildCtx('bad-frontmatter');
     const findings = await frontmatterRule.run(ctx);
-    expect(findings.some((f) => f.skill === 'desc-too-long' && f.level === 'warn' && f.message.includes('250'))).toBe(true);
+    expect(
+      findings.some(
+        (f) =>
+          f.skill === 'desc-too-long' &&
+          f.level === 'warn' &&
+          f.message.includes(String(DESCRIPTION_WARN)),
+      ),
+    ).toBe(true);
   });
 
-  it('errors on description > 1000 chars (hard limit)', async () => {
+  it(`errors on description > ${DESCRIPTION_ERROR} chars (hard limit)`, async () => {
     const ctx = await buildCtx('bad-frontmatter');
     const findings = await frontmatterRule.run(ctx);
-    expect(findings.some((f) => f.skill === 'desc-way-too-long' && f.level === 'error' && f.message.includes('1000'))).toBe(true);
+    expect(
+      findings.some(
+        (f) =>
+          f.skill === 'desc-way-too-long' &&
+          f.level === 'error' &&
+          f.message.includes(String(DESCRIPTION_ERROR)),
+      ),
+    ).toBe(true);
   });
 
   it('does not double-fire warn when description exceeds hard limit', async () => {

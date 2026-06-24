@@ -3,8 +3,8 @@ import * as path from 'path';
 import type { Finding, Rule } from '../types';
 import { parseFrontmatter } from '../utils/frontmatter';
 
-const DESCRIPTION_WARN = 800;
-const DESCRIPTION_ERROR = 1024;
+export const DESCRIPTION_WARN = 800;
+export const DESCRIPTION_ERROR = 1024;
 
 export const frontmatterRule: Rule = {
   id: 'frontmatter',
