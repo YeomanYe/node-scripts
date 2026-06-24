@@ -42,4 +42,11 @@ fi
 
 echo "[post-merge] 构建相关文件变更,运行 pnpm run build ..."
 "$PNPM_BIN" run build || echo "[post-merge] build 失败(不阻断 git)。" >&2
+
+# 文档/代码契约:工具表必须与 package.json.bin 对齐。漂移只提示,不阻断 git。
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+if [ -n "$NODE_BIN" ] && [ -f scripts/gen-tools-table.cjs ]; then
+  "$NODE_BIN" scripts/gen-tools-table.cjs --check \
+    || echo "[post-merge] 工具表与 bin 漂移,跑 'pnpm run tools:gen' 同步。" >&2
+fi
 exit 0

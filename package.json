@@ -27,8 +27,11 @@
     "usage-report": "dist/usage-report/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "watch": "tsc --watch",
+    "tools:gen": "node scripts/gen-tools-table.cjs --write",
+    "tools:check": "node scripts/gen-tools-table.cjs --check",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "start": "node dist/auto-cmd/index.js",
     "execute": "node dist/auto-cmd/index.js execute",
