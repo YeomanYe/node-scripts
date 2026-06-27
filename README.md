@@ -32,6 +32,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [zai-usage](#zai-usage) | Z.ai (智谱) Coding Plan 用量查看 |
 | [zai-watch](#zai-watch) | 轮询目标直到 OK 后报飞书并退出 |
 | [usage-report](#usage-report) | 聚合多家 LLM 用量并出报告 |
+| [llm-window-runner](#llm-window-runner) | 把任务时间吸附到最近 LLM 窗口起点执行 (minimax / zai / claude / codex) |
 
 <!-- TOOLS-TABLE:END -->
 

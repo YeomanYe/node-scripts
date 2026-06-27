@@ -24,7 +24,7 @@ describe('tools-table contract (package.json.bin <-> README/CLAUDE)', () => {
 
   it('generated tables enumerate exactly the 20 registered bins', () => {
     const names: string[] = gen.binNames();
-    expect(names.length).toBe(20);
+    expect(names.length).toBe(21);
     // README/CLAUDE 表里每个 bin 名都应出现
     const readme = gen.buildReadmeTable();
     const claude = gen.buildClaudeTable();

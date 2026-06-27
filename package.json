@@ -24,7 +24,8 @@
     "knowledge-sync": "dist/knowledge-sync/index.js",
     "zai-usage": "dist/zai-usage/index.js",
     "zai-watch": "dist/zai-watch/index.js",
-    "usage-report": "dist/usage-report/index.js"
+    "usage-report": "dist/usage-report/index.js",
+    "llm-window-runner": "dist/llm-window-runner/index.js"
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

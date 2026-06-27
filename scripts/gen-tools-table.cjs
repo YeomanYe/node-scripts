@@ -127,6 +127,11 @@ const TOOLS = {
     zh: '聚合多家 LLM 用量并出报告',
     en: 'Aggregate multi-provider LLM usage into a single report',
   },
+  'llm-window-runner': {
+    anchor: 'llm-window-runner',
+    zh: '把任务时间吸附到最近 LLM 窗口起点执行 (minimax / zai / claude / codex)',
+    en: 'Run tasks at the LLM window start nearest to their scheduled time (minimax/zai/claude/codex)',
+  },
 };
 
 function readBin() {
