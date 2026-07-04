@@ -33,6 +33,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [zai-watch](#zai-watch) | 轮询目标直到 OK 后报飞书并退出 |
 | [usage-report](#usage-report) | 聚合多家 LLM 用量并出报告 |
 | [llm-window-runner](#llm-window-runner) | 把任务时间吸附到最近 LLM 窗口起点执行 (minimax / zai / claude / codex) |
+| [connectivity-watch](#connectivity-watch) | 监控 Google/Codex/Claude/GitHub 外网访问并按状态变化通知飞书 |
 
 <!-- TOOLS-TABLE:END -->
 
@@ -645,6 +646,39 @@ node dist/skill-doctor/index.js --fix --apply --notify off
 ```
 
 `--notify` 三种模式：`on-error`（默认，仅当有 error 推送）/ `always` / `off`。
+
+---
+
+## Connectivity-Watch
+
+监控 Google、Codex/ChatGPT、Claude、GitHub 的外网访问状态。任意目标不可访问时发送一次飞书告警；不可访问期间不重复发送；全部目标恢复后再发送一次恢复通知。状态默认持久化到 `local/connectivity-watch-state.json`，避免进程重启后重复刷屏。
+
+默认复用 `local/codex-usage-config.yaml` 里的 `channels` 飞书通道：
+
+```bash
+# 构建后持续监控
+node dist/connectivity-watch/index.js
+
+# 单次探测，不发送真实飞书消息
+node dist/connectivity-watch/index.js --once --dry-run
+
+# 覆盖轮询间隔和单目标超时
+node dist/connectivity-watch/index.js --interval 60 --timeout 10
+```
+
+可在 codex 配置里追加 `connectivity_watch` 覆盖监控参数：
+
+```yaml
+connectivity_watch:
+  interval_seconds: 60
+  timeout_seconds: 10
+  state_file: local/connectivity-watch-state.json
+  targets:
+    - key: google
+      label: Google
+      url: https://www.google.com/generate_204
+      success_status: 200-399
+```
 
 ---
 

@@ -132,6 +132,11 @@ const TOOLS = {
     zh: '把任务时间吸附到最近 LLM 窗口起点执行 (minimax / zai / claude / codex)',
     en: 'Run tasks at the LLM window start nearest to their scheduled time (minimax/zai/claude/codex)',
   },
+  'connectivity-watch': {
+    anchor: 'connectivity-watch',
+    zh: '监控 Google/Codex/Claude/GitHub 外网访问并按状态变化通知飞书',
+    en: 'Monitor Google/Codex/Claude/GitHub connectivity and notify Feishu on down/recovery transitions',
+  },
 };
 
 function readBin() {

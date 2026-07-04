@@ -48,6 +48,7 @@ the markers; run `node scripts/gen-tools-table.cjs --write` after adding/removin
 | **zai-watch** | `src/zai-watch/index.ts` | Poll a target until OK (N consecutive probes) then report to Feishu and exit; supports authenticated HTTP probes and --once/--dry-run |
 | **usage-report** | `src/usage-report/index.ts` | Aggregate multi-provider LLM usage into a single report |
 | **llm-window-runner** | `src/llm-window-runner/index.ts` | Run tasks at the LLM window start nearest to their scheduled time (minimax/zai/claude/codex) |
+| **connectivity-watch** | `src/connectivity-watch/index.ts` | Monitor Google/Codex/Claude/GitHub connectivity and notify Feishu on down/recovery transitions |
 
 <!-- TOOLS-TABLE:END -->
 
