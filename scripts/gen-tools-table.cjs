@@ -137,6 +137,11 @@ const TOOLS = {
     zh: '监控 Google/Codex/Claude/GitHub 外网访问并按状态变化通知飞书',
     en: 'Monitor Google/Codex/Claude/GitHub connectivity and notify Feishu on down/recovery transitions',
   },
+  'llm-tail-burn': {
+    anchor: 'llm-tail-burn',
+    zh: '在 LLM 配额窗口尾部 burn 剩余额度（可配触发提前量/脚本/额度阈值）',
+    en: 'Burn remaining LLM quota near the end of billing windows (configurable lead time, scripts, threshold; minimax/zai/claude/codex)',
+  },
 };
 
 function readBin() {
