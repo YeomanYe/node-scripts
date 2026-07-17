@@ -1,5 +1,5 @@
 import { getCredentials } from '../claude-usage/credentials';
-import { fetchUsage } from '../claude-usage/api';
+import { fetchUsageWithFallback } from '../claude-usage/api';
 import { buildPollReport as buildClaudeReport } from '../claude-usage/poll';
 import { loadLocalAuth } from '../codex-usage/auth';
 import { getUsageSnapshot } from '../codex-usage/usage';
@@ -27,10 +27,11 @@ export interface CollectOptions {
 /** 卡片自上而下的固定顺序 */
 const PROVIDER_ORDER: ProviderKey[] = ['claude', 'codex', 'minimax', 'zai'];
 
-/** Claude：读 keychain → fetchUsage → buildPollReport（多 subscription/tier 入参） */
+/** Claude：读 keychain → fetchUsageWithFallback → buildPollReport（多 subscription/tier 入参）
+ *  fetchUsage 被 Anthropic OAuth endpoint 限流时回退到 claude-hud statusline 快照。 */
 async function defaultClaudeThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
   const credentials = await getCredentials();
-  const usage = await fetchUsage(credentials.accessToken);
+  const usage = await fetchUsageWithFallback(credentials.accessToken);
   return buildClaudeReport(usage, {
     windows: providers.claude.windows,
     nowMs,
