@@ -1,5 +1,5 @@
 import { getCredentials } from './credentials';
-import { fetchUsage } from './api';
+import { fetchUsageWithFallback } from './api';
 import { UsageData, ResetInfo } from './types';
 import { PollConfig, ClaudeAlertWindow } from './config';
 import { checkProrated, ProratedResult } from '../shared/alert/prorated';
@@ -123,7 +123,7 @@ export interface RunPollOptions {
 
 async function defaultFetcher(): Promise<{ usage: UsageData; subscription: string; tier: string }> {
   const credentials = await getCredentials();
-  const usage = await fetchUsage(credentials.accessToken);
+  const usage = await fetchUsageWithFallback(credentials.accessToken);
   return { usage, subscription: credentials.subscriptionType, tier: credentials.rateLimitTier };
 }
 

@@ -1,4 +1,5 @@
 import { UsageData, RawUsageResponse, RawUsageItem } from './types';
+import { readClaudeHudSnapshot } from './hud-snapshot';
 
 /** API 端点 */
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -100,4 +101,22 @@ export async function fetchUsage(accessToken: string): Promise<UsageData> {
   const json: unknown = await response.json();
   const raw = validateResponse(json);
   return transformResponse(raw);
+}
+
+/**
+ * 带回退的用量获取：先打 OAuth API，失败（如被 Anthropic 限流，返回 429/5xx
+ * 或网络错误）时回退读取 claude-hud statusline 快照。快照来源是 Claude Code
+ * 进程内部状态（本地 IPC，不走网络、不限流），因此能在 OAuth 路径被限流时
+ * 仍然返回真实配额。快照也不可用时抛出原始 API 错误，保持原行为。
+ */
+export async function fetchUsageWithFallback(accessToken: string): Promise<UsageData> {
+  try {
+    return await fetchUsage(accessToken);
+  } catch (apiError) {
+    const snapshot = readClaudeHudSnapshot();
+    if (snapshot) {
+      return snapshot;
+    }
+    throw apiError;
+  }
 }
