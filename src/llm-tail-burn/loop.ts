@@ -2,20 +2,28 @@
  * llm-tail-burn 的 daemon 主循环。
  *
  * 每个 task 在自己的窗口尾部独立 burn：
- *   1. 拉对应 provider 的 snapshot → meta
- *   2. planBurn(meta, task, now) → 判定是否 burn
- *   3. 未到触发时间 → sleep 到 trigger (封顶 loopMaxSleep)
- *   4. 到点且额度足够 → 循环执行 task，每次之间 cooldown
- *   5. 停止条件：窗口结束 / 额度不足 / maxIterations / stopOnError
- *   6. 窗口切换后重置计数，继续下一轮
+ *   1. 对 task 的每个 agent 拉对应 provider 的 snapshot → meta
+ *   2. evaluateAgent(agent, meta) → 单 agent 决策
+ *   3. combineDecisions(decisions, match) → task 决策
+ *   4. 未到触发时间 → sleep 到 trigger (封顶 loopMaxSleep)
+ *   5. 到点且决策为 burn → 循环执行 task，每次之间 cooldown
+ *   6. 停止条件：windowDone / maxIterations / stopOnError
+ *   7. 窗口切换后重置计数，继续下一轮
  */
 
 import { RegisteredTask } from '../llm-gated-run/config';
 import { runRegisteredTask } from '../llm-gated-run/runner';
 import { WindowProvider } from '../llm-window-runner/config';
 import { ResolveAnchorOptions, resolveWindowAnchor } from '../llm-window-runner/windows';
-import { BurnRunnerConfig, BurnTask } from './config';
-import { BurnDecision, planBurn } from './schedule';
+import { BurnAgent, BurnRunnerConfig, BurnTask } from './config';
+import {
+  AgentDecision,
+  CombinedBurnDecision,
+  combineDecisions,
+  planProjection,
+  planRate,
+  planTail,
+} from './schedule';
 
 export interface BurnLoopOptions extends ResolveAnchorOptions {
   config: BurnRunnerConfig;
@@ -30,12 +38,12 @@ export interface BurnLoopOptions extends ResolveAnchorOptions {
 
 export interface BurnPreview {
   taskName: string;
-  decision: BurnDecision;
-  meta: Record<string, unknown>;
+  decision: CombinedBurnDecision;
+  agents: AgentDecision[];
 }
 
 interface TaskState {
-  /** 当前 burn 的窗口结束时间，跨轮识别同一窗口 */
+  /** 当前 burn 的窗口结束时间，跨轮识别同一窗口（取所有 agent 中最早） */
   currentWindowEndMs: number | null;
   /** 当前窗口已 burn 次数 */
   burnCount: number;
@@ -61,9 +69,9 @@ function logError(message: string): void {
   process.stderr.write(`[${new Date().toISOString()}] [llm-tail-burn] ${message}\n`);
 }
 
-function effectiveProvider(provider: WindowProvider, taskWindow?: string): WindowProvider {
-  if (!taskWindow) return provider;
-  return { ...provider, window: taskWindow } as WindowProvider;
+function effectiveProvider(provider: WindowProvider, windowOverride?: string): WindowProvider {
+  if (!windowOverride) return provider;
+  return { ...provider, window: windowOverride } as WindowProvider;
 }
 
 function toRegisteredTask(task: BurnTask): RegisteredTask {
@@ -77,10 +85,58 @@ function toRegisteredTask(task: BurnTask): RegisteredTask {
   };
 }
 
+async function evaluateAgent(
+  agent: BurnAgent,
+  providers: Record<string, WindowProvider>,
+  opts: ResolveAnchorOptions,
+  nowMs: number
+): Promise<AgentDecision> {
+  const provider = providers[agent.provider];
+  if (!provider) throw new Error(`agent.provider 未注册：${agent.provider}`);
+  const effShort = effectiveProvider(provider, agent.window);
+
+  switch (agent.kind) {
+    case 'tail': {
+      const { meta } = await resolveWindowAnchor(effShort, opts);
+      return planTail({
+        meta,
+        leadTimeSeconds: agent.leadTimeSeconds,
+        minRemainingPercent: agent.minRemainingPercent,
+        nowMs,
+      });
+    }
+    case 'rate': {
+      const { meta } = await resolveWindowAnchor(effShort, opts);
+      return planRate({
+        meta,
+        ratePerHour: agent.ratePerHour,
+        nowMs,
+      });
+    }
+    case 'projection': {
+      const pairedProvider = providers[agent.pairedProvider];
+      if (!pairedProvider) throw new Error(`agent.pairedProvider 未注册：${agent.pairedProvider}`);
+      const effLong = effectiveProvider(pairedProvider, agent.pairedWindow);
+      const [{ meta: shortMeta }, { meta: longMeta }] = await Promise.all([
+        resolveWindowAnchor(effShort, opts),
+        resolveWindowAnchor(effLong, opts),
+      ]);
+      return planProjection({
+        shortMeta,
+        longMeta,
+        shortWindowConsumePercent: agent.shortWindowConsumePercent,
+        nowMs,
+      });
+    }
+    default:
+      throw new Error(`不支持的 agent.kind：${(agent as { kind: string }).kind}`);
+  }
+}
+
 async function runTaskLoop(
   taskName: string,
   task: BurnTask,
-  provider: WindowProvider,
+  providers: Record<string, WindowProvider>,
   opts: BurnLoopOptions
 ): Promise<void> {
   const sleep = opts.sleep ?? defaultSleep;
@@ -95,7 +151,7 @@ async function runTaskLoop(
   };
 
   logLine(
-    `task=${taskName} loop started (provider=${task.provider}${task.window ? `.${task.window}` : ''}, lead=${task.leadTimeSeconds}s, minRemain=${task.minRemainingPercent}%, maxIter=${task.maxIterations || '∞'})`
+    `task=${taskName} loop started (match=${task.match}, agents=${task.agents.length}, maxIter=${task.maxIterations || '∞'})`
   );
 
   while (!opts.signal.stopped) {
@@ -106,16 +162,13 @@ async function runTaskLoop(
       continue;
     }
 
-    let decision: BurnDecision;
+    let decision: CombinedBurnDecision;
     try {
-      const eff = effectiveProvider(provider, task.window);
-      const { meta } = await resolveWindowAnchor(eff, opts);
-      decision = planBurn({
-        meta,
-        leadTimeSeconds: task.leadTimeSeconds,
-        minRemainingPercent: task.minRemainingPercent,
-        nowMs,
-      });
+      const agentDecisions: AgentDecision[] = [];
+      for (const agent of task.agents) {
+        agentDecisions.push(await evaluateAgent(agent, providers, opts, nowMs));
+      }
+      decision = combineDecisions(agentDecisions, task.match);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       state.backoffUntilMs = now() + opts.config.loopBackoffSeconds * 1000;
@@ -136,10 +189,9 @@ async function runTaskLoop(
 
     if (!decision.burn) {
       let sleepMs: number;
-      if (nowMs < decision.triggerMs) {
+      if (decision.triggerMs != null && nowMs < decision.triggerMs) {
         sleepMs = Math.min(decision.triggerMs - nowMs, maxSleepMs);
       } else {
-        // 窗口已结束（等下轮刷新）或额度不足
         sleepMs = maxSleepMs;
       }
       logLine(`task=${taskName} wait: ${decision.reason} (sleep ${Math.round(sleepMs / 1000)}s)`);
@@ -204,12 +256,7 @@ export async function runBurnLoop(opts: BurnLoopOptions): Promise<void> {
   const loops = taskNames.map((name) => {
     const task = opts.config.tasks[name];
     if (!task) return Promise.resolve();
-    const provider = opts.config.providers[task.provider];
-    if (!provider) {
-      logError(`task=${name} 引用了未知 provider=${task.provider}，跳过`);
-      return Promise.resolve();
-    }
-    return runTaskLoop(name, task, provider, opts);
+    return runTaskLoop(name, task, opts.config.providers, opts);
   });
 
   await Promise.all(loops);
@@ -225,15 +272,10 @@ export async function computeBurnPreview(
 ): Promise<BurnPreview> {
   const task = config.tasks[taskName];
   if (!task) throw new Error(`未注册任务：${taskName}`);
-  const provider = config.providers[task.provider];
-  if (!provider) throw new Error(`task=${taskName} 引用了未知 provider=${task.provider}`);
-  const eff = effectiveProvider(provider, task.window);
-  const { meta } = await resolveWindowAnchor(eff, options);
-  const decision = planBurn({
-    meta,
-    leadTimeSeconds: task.leadTimeSeconds,
-    minRemainingPercent: task.minRemainingPercent,
-    nowMs,
-  });
-  return { taskName, decision, meta };
+  const agents: AgentDecision[] = [];
+  for (const agent of task.agents) {
+    agents.push(await evaluateAgent(agent, config.providers, options, nowMs));
+  }
+  const decision = combineDecisions(agents, task.match);
+  return { taskName, decision, agents };
 }

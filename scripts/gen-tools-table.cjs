@@ -139,8 +139,8 @@ const TOOLS = {
   },
   'llm-tail-burn': {
     anchor: 'llm-tail-burn',
-    zh: '在 LLM 配额窗口尾部 burn 剩余额度（可配触发提前量/脚本/额度阈值）',
-    en: 'Burn remaining LLM quota near the end of billing windows (configurable lead time, scripts, threshold; minimax/zai/claude/codex)',
+    zh: '在 LLM 配额窗口尾部 burn 剩余额度（tail/rate/projection 三种判定 + 多 agent all/any 组合；minimax/zai/claude/codex）',
+    en: 'Burn remaining LLM quota via multi-agent rules (tail/rate/projection kinds, all/any match; minimax/zai/claude/codex)',
   },
 };
 

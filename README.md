@@ -34,7 +34,7 @@ Node.js 命令行工具集，包含自动化命令调度、编辑器配置同步
 | [usage-report](#usage-report) | 聚合多家 LLM 用量并出报告 |
 | [llm-window-runner](#llm-window-runner) | 把任务时间吸附到最近 LLM 窗口起点执行 (minimax / zai / claude / codex) |
 | [connectivity-watch](#connectivity-watch) | 监控 Google/Codex/Claude/GitHub 外网访问并按状态变化通知飞书 |
-| [llm-tail-burn](#llm-tail-burn) | 在 LLM 配额窗口尾部 burn 剩余额度（可配触发提前量/脚本/额度阈值） |
+| [llm-tail-burn](#llm-tail-burn) | 在 LLM 配额窗口尾部 burn 剩余额度（tail/rate/projection 三种判定 + 多 agent all/any 组合；minimax/zai/claude/codex） |
 
 <!-- TOOLS-TABLE:END -->
 

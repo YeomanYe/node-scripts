@@ -6,6 +6,7 @@ import { DEFAULT_API_KEY_ENV as Z_DEFAULT_API_KEY_ENV } from '../zai-usage/env';
 import { ResolveAnchorOptions } from '../llm-window-runner/windows';
 import { DEFAULT_CONFIG_PATH, loadBurnConfig } from './config';
 import { computeBurnPreview, runBurnLoop } from './loop';
+import { AgentDecision } from './schedule';
 
 interface BaseOptions {
   config: string;
@@ -42,6 +43,15 @@ function fmt(ms: number): string {
   return new Date(ms).toLocaleString('zh-CN', { hour12: false });
 }
 
+function fmtRemain(p: number | null): string {
+  return p != null ? `${p.toFixed(1)}%` : '?';
+}
+
+function fmtAgent(a: AgentDecision, idx: number): string {
+  const tag = a.ready ? '+' : '-';
+  return `  agent[${idx}] ${a.kind}${tag} ${fmtRemain(a.remainingPercent)} end=${fmt(a.windowEndMs)} | ${a.reason}`;
+}
+
 async function cmdList(options: BaseOptions): Promise<void> {
   const config = await loadBurnConfig(options.config);
   const resolveOpts = toResolveOpts(options);
@@ -54,11 +64,14 @@ async function cmdList(options: BaseOptions): Promise<void> {
   for (const name of names) {
     try {
       const { decision } = await computeBurnPreview(name, config, resolveOpts, now);
-      const remain = decision.remainingPercent != null ? `${decision.remainingPercent.toFixed(1)}%` : '?';
       const tag = decision.burn ? 'BURN-NOW' : 'WAIT';
+      const readyCount = decision.agents.filter((a) => a.ready).length;
       process.stdout.write(
-        `${name}  [${tag}]  remain=${remain}  end=${fmt(decision.windowEndMs)}  trigger=${fmt(decision.triggerMs)}  (${decision.reason})\n`
+        `${name}  [${tag}]  match=${decision.match} agents=${readyCount}/${decision.agents.length}  end=${fmt(decision.windowEndMs)}\n`
       );
+      for (let i = 0; i < decision.agents.length; i++) {
+        process.stdout.write(fmtAgent(decision.agents[i]!, i) + '\n');
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       process.stdout.write(`${name}  ERROR  ${message}\n`);
@@ -69,20 +82,29 @@ async function cmdList(options: BaseOptions): Promise<void> {
 async function cmdNext(name: string, options: NextOptions): Promise<void> {
   const config = await loadBurnConfig(options.config);
   const resolveOpts = toResolveOpts(options);
-  const { decision, meta } = await computeBurnPreview(name, config, resolveOpts);
+  const { decision, agents } = await computeBurnPreview(name, config, resolveOpts);
   if (options.json) {
     process.stdout.write(
       JSON.stringify(
         {
           task: name,
           burn: decision.burn,
+          match: decision.match,
           reason: decision.reason,
           windowEndMs: decision.windowEndMs,
           windowEndAt: new Date(decision.windowEndMs).toISOString(),
           triggerMs: decision.triggerMs,
-          triggerAt: new Date(decision.triggerMs).toISOString(),
           remainingPercent: decision.remainingPercent,
-          meta,
+          agents: agents.map((a, i) => ({
+            index: i,
+            kind: a.kind,
+            ready: a.ready,
+            reason: a.reason,
+            windowEndMs: a.windowEndMs,
+            triggerMs: a.triggerMs,
+            remainingPercent: a.remainingPercent,
+            meta: a.meta,
+          })),
         },
         null,
         2
@@ -91,13 +113,15 @@ async function cmdNext(name: string, options: NextOptions): Promise<void> {
     return;
   }
   process.stdout.write(`task=${name}\n`);
-  process.stdout.write(`burn=${decision.burn}  (${decision.reason})\n`);
+  process.stdout.write(`burn=${decision.burn} match=${decision.match}  (${decision.reason})\n`);
   process.stdout.write(`windowEnd=${fmt(decision.windowEndMs)} (${new Date(decision.windowEndMs).toISOString()})\n`);
-  process.stdout.write(`trigger =${fmt(decision.triggerMs)} (${new Date(decision.triggerMs).toISOString()})\n`);
-  process.stdout.write(
-    `remain  =${decision.remainingPercent != null ? decision.remainingPercent.toFixed(1) + '%' : '?'}\n`
-  );
-  process.stdout.write(`meta=${JSON.stringify(meta)}\n`);
+  if (decision.triggerMs != null) {
+    process.stdout.write(`trigger =${fmt(decision.triggerMs)} (${new Date(decision.triggerMs).toISOString()})\n`);
+  }
+  process.stdout.write(`remain  =${fmtRemain(decision.remainingPercent)}\n`);
+  for (let i = 0; i < agents.length; i++) {
+    process.stdout.write(fmtAgent(agents[i]!, i) + '\n');
+  }
 }
 
 async function cmdLoop(options: BaseOptions): Promise<void> {
@@ -121,9 +145,9 @@ export function createProgram(): Command {
   const program = new Command();
   program
     .name('llm-tail-burn')
-    .description('在 LLM 配额窗口尾部 burn 掉剩余额度 (minimax/zai/claude/codex)');
+    .description('在 LLM 配额窗口尾部 burn 剩余额度 (minimax/zai/claude/codex，支持多 agent all/any 组合)');
 
-  addBaseOptions(program.command('list').description('列出每个任务的 burn 计划（是否到点、剩余额度）')).action(
+  addBaseOptions(program.command('list').description('列出每个任务的 burn 计划（含每个 agent 的子决策）')).action(
     (options: BaseOptions) => cmdList(options)
   );
 
