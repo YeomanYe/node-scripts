@@ -89,7 +89,10 @@ claude-usage --poll 300 --config ./local/claude-usage-config.yaml
 
 ### PM2 后台运行
 
-`claude-usage` 作为独立 CLI 仍可 `--watch`/`--poll`，但 PM2 已不再单独调度它。仓库现在的 PM2 用量任务统一交给 `usage-report`（聚合 Claude/Codex/MiniMax/Z.ai 一张卡），见 `local/pm2.config.js` 中的 `usage-report-poll` 条目，发送通道复用本配置的飞书 claude 通道。
+`claude-usage` 作为独立 CLI 仍可 `--watch`/`--poll`，但 PM2 已不再单独调度它。
+仓库现在的 PM2 用量任务统一交给 `usage-report`；它根据 CodexBar 菜单栏的启用项、
+顺序和配额偏好动态生成一张卡，见 `local/pm2.config.js` 中的
+`usage-report-poll` 条目。
 
 ```bash
 pnpm install -g pm2      # 或 pnpm add -g pm2

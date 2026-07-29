@@ -3,11 +3,11 @@ import { ProviderResult } from '@/usage-report/types';
 
 const NOW = Date.UTC(2026, 5, 21, 12, 0, 0); // 2026-06-21 12:00:00 UTC
 
-function ok(key: 'claude' | 'codex' | 'minimax' | 'zai', content: string, level: 'info' | 'warn' = 'info', summaryLine = `${key}-summary`): ProviderResult {
+function ok(key: string, content: string, level: 'info' | 'warn' = 'info', summaryLine = `${key}-summary`): ProviderResult {
   return { status: 'ok', key, report: { title: `${key} title`, content, level, summaryLine } };
 }
 
-function err(key: 'claude' | 'codex' | 'minimax' | 'zai', message: string): ProviderResult {
+function err(key: string, message: string): ProviderResult {
   return { status: 'error', key, message };
 }
 
@@ -84,6 +84,13 @@ describe('buildAggregateCard', () => {
     const card = buildAggregateCard([ok('claude', 'c'), ok('codex', 'c'), ok('minimax', 'c'), ok('zai', 'c')], { nowMs: NOW });
     expect(card.content).toContain('**当前时间**：');
     expect(card.content).toContain('2026-06-21');
+    expect(card.content).toContain('**CodexBar 启用项**：Claude / Codex / MiniMax / Z.ai');
+  });
+
+  it('supports any provider enabled by CodexBar with a safe fallback label', () => {
+    const card = buildAggregateCard([ok('openrouter', 'openrouter-body')], { nowMs: NOW });
+    expect(card.content).toContain('🤖 **OpenRouter**');
+    expect(card.content).toContain('openrouter-body');
   });
 
   it('summaryLine：ok 形如 key=<report.summaryLine>，error 形如 key=ERROR:<message>', () => {

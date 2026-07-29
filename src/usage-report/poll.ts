@@ -1,5 +1,5 @@
 import { buildNotifiers } from '../shared/notifiers';
-import { AggregateConfig, ProviderOverrides } from './types';
+import { AggregateConfig } from './types';
 import { CollectOptions, collectAllReports } from './collect';
 import { buildAggregateCard } from './aggregate';
 
@@ -12,11 +12,10 @@ export interface RunOnceOptions {
   logError: (line: string) => void;
 }
 
-/** 执行一次聚合轮询：collect 4 个 provider → 拼一张卡 → 一次性发送 */
+/** 执行一次聚合轮询：collect CodexBar 启用项 → 拼一张卡 → 一次性发送 */
 export async function runOnce(options: RunOnceOptions): Promise<void> {
   const nowMs = Date.now();
   const results = await collectAllReports({
-    providers: options.config.providers,
     nowMs,
     ...options.collectOptions,
   });
@@ -74,9 +73,4 @@ export async function runPoll(options: RunPollOptions): Promise<void> {
     }
     void tick();
   }, options.intervalSec * 1000);
-}
-
-/** 将 AggregateConfig 的 providers 转成 collect 所需（CLI 注入用） */
-export function toCollectProviders(config: AggregateConfig): ProviderOverrides {
-  return config.providers;
 }

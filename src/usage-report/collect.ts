@@ -1,118 +1,89 @@
-import { getCredentials } from '../claude-usage/credentials';
-import { fetchUsageWithFallback } from '../claude-usage/api';
-import { buildPollReport as buildClaudeReport } from '../claude-usage/poll';
-import { loadLocalAuth } from '../codex-usage/auth';
-import { getUsageSnapshot } from '../codex-usage/usage';
-import { buildPollReport as buildCodexReport } from '../codex-usage/poll';
-import { readMiniMaxApiKey } from '../minimax-usage/env';
-import { fetchMiniMaxQuota } from '../minimax-usage/quota';
-import { buildPollReport as buildMiniMaxReport } from '../minimax-usage/poll';
-import { readZaiApiKey } from '../zai-usage/env';
-import { fetchZaiUsage } from '../zai-usage/quota';
-import { buildPollReport as buildZaiReport } from '../zai-usage/poll';
-import { PollReportLike, ProviderKey, ProviderOverrides, ProviderResult } from './types';
 import {
-  buildCodexBarPollReport,
-  fetchCodexBarAccountResults,
-  readCodexBarMetricPreference,
+  buildCodexBarProviderReport,
+  CodexBarSettings,
+  CodexBarUsageEntry,
+  fetchCodexBarProviderEntries,
+  readCodexBarSettings,
 } from './codexbar';
+import { PollReportLike, ProviderKey, ProviderResult } from './types';
 
 /** 测试可注入的 fetcher：返回该 provider 的已构造 PollReport */
 export type ProviderFetcher = () => Promise<PollReportLike>;
 
 export interface CollectOptions {
-  /** 各 provider 的可覆盖参数（来自聚合 config） */
-  providers: ProviderOverrides;
-  /** 当前时间戳（传给各 provider 的 buildPollReport） */
+  /** 当前时间戳（传给 CodexBar report builder） */
   nowMs: number;
-  /** 可选：注入 fetcher（测试用）。缺省走真实「读凭证→fetch→buildPollReport」链路 */
+  /** 可选：直接注入已构造的 provider report（测试用） */
   fetchers?: Partial<Record<ProviderKey, ProviderFetcher>>;
+  /** 可选：注入 CodexBar 设置读取器（测试用） */
+  codexBarSettingsReader?: () => Promise<CodexBarSettings>;
+  /** 可选：注入单 provider 的 CodexBar 用量读取器（测试用） */
+  codexBarProviderFetcher?: (provider: string) => Promise<CodexBarUsageEntry[]>;
 }
 
-/** 卡片自上而下的固定顺序 */
-const PROVIDER_ORDER: ProviderKey[] = ['claude', 'codex', 'minimax', 'zai'];
+/** 仅用于保持旧测试注入的稳定顺序；真实运行顺序完全来自 CodexBar config.json。 */
+const LEGACY_TEST_ORDER = ['claude', 'codex', 'minimax', 'zai'] as const;
 
-/** Claude：读 keychain → fetchUsageWithFallback → buildPollReport（多 subscription/tier 入参）
- *  fetchUsage 被 Anthropic OAuth endpoint 限流时回退到 claude-hud statusline 快照。 */
-async function defaultClaudeThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
-  const credentials = await getCredentials();
-  const usage = await fetchUsageWithFallback(credentials.accessToken);
-  return buildClaudeReport(usage, {
-    windows: providers.claude.windows,
-    nowMs,
-    subscription: credentials.subscriptionType,
-    tier: credentials.rateLimitTier,
+function orderedInjectedProviders(
+  fetchers: Partial<Record<ProviderKey, ProviderFetcher>>
+): ProviderKey[] {
+  const keys = Object.keys(fetchers);
+  return [
+    ...LEGACY_TEST_ORDER.filter((key) => keys.includes(key)),
+    ...keys.filter((key) => !LEGACY_TEST_ORDER.includes(key as typeof LEGACY_TEST_ORDER[number])),
+  ];
+}
+
+async function settleReports(
+  providers: ProviderKey[],
+  fetcherFor: (provider: ProviderKey) => ProviderFetcher
+): Promise<ProviderResult[]> {
+  const settled = await Promise.allSettled(
+    providers.map((provider) => fetcherFor(provider)())
+  );
+
+  return providers.map((key, index) => {
+    const result = settled[index];
+    if (result.status === 'fulfilled') {
+      return { status: 'ok' as const, key, report: result.value };
+    }
+    const message =
+      result.reason instanceof Error ? result.reason.message : String(result.reason);
+    return { status: 'error' as const, key, message };
   });
 }
 
 /**
- * Codex 默认完全委托 CodexBar：
- * `codexbar usage --format json --provider codex --source cli --all-accounts`。
- * 因而账号集合、账号切换和凭证来源都与 CodexBar 配置一致。
- * 只有聚合配置显式包含 auth_file/base_url 时，才保留旧的单账号直连路径。
+ * 真实运行时先读取 CodexBar 的菜单栏配置：
+ * - `~/.codexbar/config.json` 决定查询哪些 provider 以及展示顺序；
+ * - plist 的 `menuBarMetricPreferences` 决定每个 provider 查询后展示哪个配额；
+ * - 每个启用项均通过 CodexBar CLI 获取标准化用量。
  */
-async function defaultCodexThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
-  if (providers.codex.source !== 'auth-file') {
-    const [results, metricPreference] = await Promise.all([
-      fetchCodexBarAccountResults(),
-      readCodexBarMetricPreference(),
-    ]);
-    return buildCodexBarPollReport(results, {
-      windows: providers.codex.windows,
-      metricPreference,
-      nowMs,
+export async function collectAllReports(options: CollectOptions): Promise<ProviderResult[]> {
+  if (options.fetchers) {
+    const providers = orderedInjectedProviders(options.fetchers);
+    return settleReports(providers, (provider) => {
+      const fetcher = options.fetchers?.[provider];
+      return fetcher ?? (async () => {
+        throw new Error(`缺少 ${provider} fetcher`);
+      });
     });
   }
 
-  const auth = await loadLocalAuth(providers.codex.authFile);
-  const snapshot = await getUsageSnapshot({
-    accessToken: auth.accessToken,
-    accountId: auth.accountId,
-    baseUrl: providers.codex.baseUrl,
-  });
-  return buildCodexReport(snapshot, { windows: providers.codex.windows, nowMs });
-}
+  const settingsReader = options.codexBarSettingsReader ?? readCodexBarSettings;
+  const providerFetcher =
+    options.codexBarProviderFetcher ?? fetchCodexBarProviderEntries;
+  const settings = await settingsReader();
 
-/** MiniMax：读 .env → fetchMiniMaxQuota → buildPollReport */
-async function defaultMiniMaxThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
-  const apiKey = await readMiniMaxApiKey({
-    envFile: providers.minimax.envFile ?? '',
-    apiKeyEnv: providers.minimax.apiKeyEnv ?? '',
-  });
-  const snapshot = await fetchMiniMaxQuota({ apiKey, apiHost: providers.minimax.apiHost });
-  return buildMiniMaxReport(snapshot, { windows: providers.minimax.windows, nowMs });
-}
+  if (settings.enabledProviders.length === 0) {
+    throw new Error('CodexBar 菜单栏没有启用任何 provider');
+  }
 
-/** Z.ai：读 .env → fetchZaiUsage → buildPollReport */
-async function defaultZaiThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
-  const apiKey = await readZaiApiKey({
-    envFile: providers.zai.envFile ?? '',
-    apiKeyEnv: providers.zai.apiKeyEnv ?? '',
-  });
-  const snapshot = await fetchZaiUsage({ apiKey, apiHost: providers.zai.apiHost });
-  return buildZaiReport(snapshot, { windows: providers.zai.windows, nowMs });
-}
-
-/**
- * 并行跑 4 个 provider 的「读凭证→fetch→buildPollReport」，单个失败不致命。
- * 用 Promise.allSettled 容错，返回顺序固定为 [claude, codex, minimax, zai]。
- */
-export async function collectAllReports(options: CollectOptions): Promise<ProviderResult[]> {
-  const tasks: Record<ProviderKey, ProviderFetcher> = {
-    claude: options.fetchers?.claude ?? (() => defaultClaudeThunk(options.providers, options.nowMs)),
-    codex: options.fetchers?.codex ?? (() => defaultCodexThunk(options.providers, options.nowMs)),
-    minimax: options.fetchers?.minimax ?? (() => defaultMiniMaxThunk(options.providers, options.nowMs)),
-    zai: options.fetchers?.zai ?? (() => defaultZaiThunk(options.providers, options.nowMs)),
-  };
-
-  const settled = await Promise.allSettled(PROVIDER_ORDER.map((key) => tasks[key]()));
-
-  return PROVIDER_ORDER.map((key, i) => {
-    const r = settled[i];
-    if (r.status === 'fulfilled') {
-      return { status: 'ok' as const, key, report: r.value };
-    }
-    const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
-    return { status: 'error' as const, key, message: reason };
+  return settleReports(settings.enabledProviders, (provider) => async () => {
+    const entries = await providerFetcher(provider);
+    return buildCodexBarProviderReport(provider, entries, {
+      metricPreference: settings.metricPreferences[provider] ?? 'primary',
+      nowMs: options.nowMs,
+    });
   });
 }

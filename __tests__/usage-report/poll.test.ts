@@ -1,18 +1,10 @@
 import { runOnce } from '@/usage-report/poll';
-import { AggregateConfig, ProviderOverrides } from '@/usage-report/types';
+import { AggregateConfig } from '@/usage-report/types';
 import { Notifier, NotifierMessage } from '@/shared/notifiers/types';
-
-const PROVIDERS: ProviderOverrides = {
-  claude: { windows: ['five_hour', 'seven_day'] },
-  codex: { windows: ['primary', 'secondary'] },
-  minimax: { windows: ['interval', 'weekly'] },
-  zai: { windows: ['primary', 'secondary'] },
-};
 
 const CONFIG: AggregateConfig = {
   poll: { interval_seconds: 900 },
   channels: [],
-  providers: PROVIDERS,
 };
 
 function makeNotifier(name: string, behavior: 'ok' | 'fail'): Notifier & { calls: NotifierMessage[] } {

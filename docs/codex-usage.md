@@ -78,15 +78,20 @@ codex-usage --poll 300 --config ./local/codex-usage-config.yaml
 
 ### PM2
 
-`codex-usage` 作为独立 CLI 仍可 `--watch`/`--poll`，但 PM2 已不再单独调度它。仓库现在的 PM2 用量任务统一交给 `usage-report`（聚合 Claude/Codex/MiniMax/Z.ai 一张卡），见 `local/pm2.config.js` 中的 `usage-report-poll` 条目，发送通道复用原 claude-usage 的飞书 claude 通道。
+`codex-usage` 作为独立 CLI 仍可 `--watch`/`--poll`，但 PM2 已不再单独调度它。
+仓库现在的 PM2 用量任务统一交给 `usage-report`，见
+`local/pm2.config.js` 中的 `usage-report-poll` 条目。
 
-`usage-report` 的 Codex 采集默认调用
-`codexbar usage --format json --provider codex --source cli --all-accounts`，
-因此账号列表、账号凭证和可见性与 CodexBar 配置一致，并会在 Codex 区块逐账号展示。
-推送展示和告警判定使用
-`~/Library/Preferences/com.steipete.codexbar.plist` 中
-`menuBarMetricPreferences.codex` 配置的配额窗口；若某个账号没有该窗口，则与
-`ty-vibe-kanban` 一样回退到该账号实际可用的窗口。读取不到 CodexBar 偏好时，
-才回退到聚合配置中的 `providers.codex.windows`。
-运行环境需要能从 `PATH` 找到 `codexbar`。若聚合配置显式设置 `auth_file` 或
-`base_url`，则保留旧的单账号直连模式。
+`usage-report` 完全以 CodexBar 菜单栏配置为准：
+
+- `~/.codexbar/config.json` 的 `providers[].enabled` 决定查询、展示哪些 provider，
+  数组顺序同时决定卡片顺序。
+- `~/Library/Preferences/com.steipete.codexbar.plist` 的
+  `menuBarMetricPreferences` 决定每个 provider 展示和告警判定的配额窗口。
+- 每个启用 provider 都通过 `codexbar usage --format json --provider <id>` 查询；
+  Claude 追加 `--source oauth`，Codex 追加 `--source cli --all-accounts`。
+- 配置窗口不存在时，与 `ty-vibe-kanban` 一样回退到该条目实际可用的
+  Primary、Secondary 或 Tertiary 窗口。
+
+聚合 YAML 只保留轮询间隔和通知通道，不再接受 provider/window 覆盖。
+运行环境需要能从 `PATH` 找到 `codexbar`。

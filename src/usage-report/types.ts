@@ -1,16 +1,10 @@
-import { ClaudeAlertWindow } from '../claude-usage/config';
-import { CodexAlertWindow } from '../codex-usage/config';
-import { MiniMaxAlertWindow } from '../minimax-usage/config';
-import { ZaiAlertWindow } from '../zai-usage/config';
 import { ChannelConfig } from '../shared/notifiers/types';
 
-/** 聚合的四个用量 provider */
-export type ProviderKey = 'claude' | 'codex' | 'minimax' | 'zai';
+/** CodexBar 配置中启用的 provider id */
+export type ProviderKey = string;
 
 /**
- * 收窄 4 个 provider 各自的 PollReport 到统一字段。
- * 各 provider 的 PollReport 都 extends NotifierMessage 且带 summaryLine，
- * 但 alerts 字段的泛型各异，聚合阶段只关心 title/content/level/summaryLine。
+ * CodexBar 各 provider 的报告统一收窄到聚合阶段需要的字段。
  */
 export interface PollReportLike {
   /** 卡片标题 */
@@ -41,37 +35,11 @@ export interface ProviderError {
 /** 单个 provider 的聚合结果 */
 export type ProviderResult = ProviderOk | ProviderError;
 
-/** 各 provider 在聚合配置中可覆盖的参数 */
-export interface ProviderOverrides {
-  claude: { windows: ClaudeAlertWindow[] };
-  codex: {
-    windows: CodexAlertWindow[];
-    /** 默认 codexbar；显式配置 auth_file/base_url 时走旧的单账号直连路径 */
-    source?: 'codexbar' | 'auth-file';
-    authFile?: string;
-    baseUrl?: string;
-  };
-  minimax: {
-    windows: MiniMaxAlertWindow[];
-    envFile?: string;
-    apiKeyEnv?: string;
-    apiHost?: string;
-  };
-  zai: {
-    windows: ZaiAlertWindow[];
-    envFile?: string;
-    apiKeyEnv?: string;
-    apiHost?: string;
-  };
-}
-
 /** 聚合脚本配置 */
 export interface AggregateConfig {
   poll: { interval_seconds: number };
   /** 复用 claude 通道凭据（与 claude-usage-config.yaml 同一组飞书会话） */
   channels: ChannelConfig[];
-  /** 各 provider 可覆盖参数；windows 缺省走各 provider 默认值 */
-  providers: ProviderOverrides;
 }
 
 /** 聚合后的飞书卡片 */

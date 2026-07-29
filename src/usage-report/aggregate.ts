@@ -1,12 +1,23 @@
 import { AggregateCard, ProviderKey, ProviderResult } from './types';
 
 /** 各 provider 在卡片中的展示样式（emoji + 标签） */
-export const PROVIDER_DISPLAY: Record<ProviderKey, { emoji: string; label: string }> = {
+export const PROVIDER_DISPLAY: Record<string, { emoji: string; label: string }> = {
   claude: { emoji: '🟦', label: 'Claude' },
   codex: { emoji: '🟩', label: 'Codex' },
   minimax: { emoji: '🟪', label: 'MiniMax' },
   zai: { emoji: '🟧', label: 'Z.ai' },
+  openrouter: { emoji: '🤖', label: 'OpenRouter' },
+  cursor: { emoji: '🤖', label: 'Cursor' },
+  gemini: { emoji: '🤖', label: 'Gemini' },
+  opencode: { emoji: '🤖', label: 'OpenCode' },
 };
+
+export function getProviderDisplay(key: ProviderKey): { emoji: string; label: string } {
+  return PROVIDER_DISPLAY[key] ?? {
+    emoji: '🤖',
+    label: key.length > 0 ? key.charAt(0).toUpperCase() + key.slice(1) : 'Unknown',
+  };
+}
 
 /** 把 epoch ms 格式化为本地时间字符串 YYYY-MM-DD HH:mm:ss */
 export function formatLocalTime(ms: number): string {
@@ -19,11 +30,12 @@ export function formatLocalTime(ms: number): string {
 }
 
 /**
- * 把 4 个 provider 的结果拼成一张飞书卡片的 {title, content, level, summaryLine}。
+ * 把 CodexBar 启用 provider 的结果拼成一张飞书卡片的
+ * {title, content, level, summaryLine}。
  * 纯函数，无副作用。
  *
  * - level：任一「成功且 warn」的 provider 触发整体 warn（红 header）；失败的 provider 不计入
- * - content：顶部时间戳 header + 4 个 provider 分块（块间用 lark_md 分隔线 ---）
+ * - content：顶部时间戳 + CodexBar 启用项 + provider 分块
  * - 失败的 provider 块显示「⚠️ 获取失败：<message>」
  */
 export function buildAggregateCard(results: ProviderResult[], opts: { nowMs: number }): AggregateCard {
@@ -32,12 +44,13 @@ export function buildAggregateCard(results: ProviderResult[], opts: { nowMs: num
   const title = anyWarn ? '🚨 LLM 用量告警' : '📊 LLM 用量汇总';
 
   // 顶部时间戳 header
-  const header = `**当前时间**：${formatLocalTime(opts.nowMs)}`;
+  const enabledLabels = results.map((result) => getProviderDisplay(result.key).label).join(' / ');
+  const enabled = enabledLabels ? ` ｜ **CodexBar 启用项**：${enabledLabels}` : '';
+  const header = `**当前时间**：${formatLocalTime(opts.nowMs)}${enabled}`;
 
-  // 每个 provider 一块：标题独占一行，块与块之间用空行分隔（lark_md 里单 \n 换行较弱，
-  // 用空行让 4 个 provider 在卡片里清晰分行、互不挤压）
+  // 每个 provider 一块：标题独占一行，块与块之间用空行分隔。
   const providerBlocks = results.map((r) => {
-    const { emoji, label } = PROVIDER_DISPLAY[r.key];
+    const { emoji, label } = getProviderDisplay(r.key);
     const body = r.status === 'ok' ? r.report.content : `⚠️ 获取失败：${r.message}`;
     return `${emoji} **${label}**\n${body}`;
   });

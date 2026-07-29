@@ -6,11 +6,13 @@ import { loadPollConfig } from '@/usage-report/config';
 async function writeTemp(content: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'usage-report-cfg-'));
   const file = path.join(dir, 'config.yaml');
-  await fs.writeFile(file, content, 'utf-8');
+  await fs.writeFile(file, content, 'utf8');
   return file;
 }
 
-const FULL_CONFIG = `
+describe('loadPollConfig', () => {
+  it('parses only polling and notification settings', async () => {
+    const file = await writeTemp(`
 poll:
   interval_seconds: 900
 channels:
@@ -19,105 +21,42 @@ channels:
     app_secret: "secret"
     receive_id: "oc_x"
     receive_id_type: chat_id
+`);
+
+    const config = await loadPollConfig(file);
+    expect(config.poll.interval_seconds).toBe(900);
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0]).toMatchObject({
+      type: 'feishu',
+      app_id: 'cli_x',
+      receive_id: 'oc_x',
+    });
+    expect(config).not.toHaveProperty('providers');
+  });
+
+  it('ignores legacy provider overrides because CodexBar owns provider and metric selection', async () => {
+    const file = await writeTemp(`
+channels: []
 providers:
   claude:
-    windows: [five_hour, seven_day]
-  codex:
-    windows: [primary, secondary]
-  minimax:
-    windows: [interval, weekly]
+    windows: [not-a-real-window]
   zai:
-    windows: [primary, secondary]
-`;
-
-describe('loadPollConfig', () => {
-  it('解析完整配置：interval、channels、各 provider windows', async () => {
-    const file = await writeTemp(FULL_CONFIG);
-    const cfg = await loadPollConfig(file);
-    expect(cfg.poll.interval_seconds).toBe(900);
-    expect(cfg.channels).toHaveLength(1);
-    expect(cfg.channels[0]).toMatchObject({ type: 'feishu', app_id: 'cli_x', receive_id: 'oc_x' });
-    expect(cfg.providers.claude.windows).toEqual(['five_hour', 'seven_day']);
-    expect(cfg.providers.codex.windows).toEqual(['primary', 'secondary']);
-    expect(cfg.providers.codex.source).toBe('codexbar');
-    expect(cfg.providers.codex.authFile).toBeUndefined();
-    expect(cfg.providers.minimax.windows).toEqual(['interval', 'weekly']);
-    expect(cfg.providers.zai.windows).toEqual(['primary', 'secondary']);
-  });
-
-  it('省略某 provider 时其 windows 回退到该 provider 默认值', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-providers:
-  claude:
-    windows: [seven_day_opus]
+    api_host: https://example.com
 `);
-    const cfg = await loadPollConfig(file);
-    // claude 显式指定
-    expect(cfg.providers.claude.windows).toEqual(['seven_day_opus']);
-    // 其余回退默认
-    expect(cfg.providers.codex.windows).toEqual(['primary', 'secondary']);
-    expect(cfg.providers.minimax.windows).toEqual(['interval', 'weekly']);
-    expect(cfg.providers.zai.windows).toEqual(['primary', 'secondary']);
+
+    await expect(loadPollConfig(file)).resolves.toEqual({
+      poll: { interval_seconds: 300 },
+      channels: [],
+    });
   });
 
-  it('完全省略 providers 时全部回退默认', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-`);
-    const cfg = await loadPollConfig(file);
-    expect(cfg.providers.claude.windows).toEqual(['five_hour', 'seven_day']);
+  it('defaults the poll interval to 300 seconds', async () => {
+    const file = await writeTemp('channels: []\n');
+    const config = await loadPollConfig(file);
+    expect(config.poll.interval_seconds).toBe(300);
   });
 
-  it('interval 缺省回退 300', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-`);
-    const cfg = await loadPollConfig(file);
-    expect(cfg.poll.interval_seconds).toBe(300);
-  });
-
-  it('拒绝非法 window（claude 配置了 codex 的 primary）', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-providers:
-  claude:
-    windows: [primary]
-`);
-    await expect(loadPollConfig(file)).rejects.toThrow(/claude.*windows.*非法|非法.*primary/i);
-  });
-
-  it('拒绝非法 window（minimax 配置了 primary）', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-providers:
-  minimax:
-    windows: [primary]
-`);
-    await expect(loadPollConfig(file)).rejects.toThrow(/minimax.*windows.*非法|非法.*primary/i);
-  });
-
-  it('拒绝缺失 app_id 的 channel', async () => {
+  it('rejects a channel missing app_id', async () => {
     const file = await writeTemp(`
 channels:
   - type: feishu
@@ -127,7 +66,7 @@ channels:
     await expect(loadPollConfig(file)).rejects.toThrow(/app_id/);
   });
 
-  it('拒绝未知通道类型', async () => {
+  it('rejects an unknown channel type', async () => {
     const file = await writeTemp(`
 channels:
   - type: slack
@@ -136,35 +75,5 @@ channels:
     receive_id: r
 `);
     await expect(loadPollConfig(file)).rejects.toThrow(/未知通道类型/);
-  });
-
-  it('透传 provider 覆盖参数（codex authFile/baseUrl、minimax envFile/apiHost 等）', async () => {
-    const file = await writeTemp(`
-channels:
-  - type: feishu
-    app_id: a
-    app_secret: s
-    receive_id: r
-providers:
-  codex:
-    auth_file: /tmp/auth.json
-    base_url: https://example.com/backend-api
-  minimax:
-    env_file: /tmp/.env
-    api_key_env: MM_KEY
-    api_host: https://mm.example.com
-  zai:
-    env_file: /tmp/.env
-    api_key_env: Z_KEY
-    api_host: https://zai.example.com
-`);
-    const cfg = await loadPollConfig(file);
-    expect(cfg.providers.codex.authFile).toBe('/tmp/auth.json');
-    expect(cfg.providers.codex.baseUrl).toBe('https://example.com/backend-api');
-    expect(cfg.providers.codex.source).toBe('auth-file');
-    expect(cfg.providers.minimax.envFile).toBe('/tmp/.env');
-    expect(cfg.providers.minimax.apiKeyEnv).toBe('MM_KEY');
-    expect(cfg.providers.minimax.apiHost).toBe('https://mm.example.com');
-    expect(cfg.providers.zai.apiHost).toBe('https://zai.example.com');
   });
 });

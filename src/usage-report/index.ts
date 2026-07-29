@@ -37,7 +37,7 @@ export function parseSeconds(raw: string | true, defaultSec: number): number {
 async function notifyOnce(options: CliOptions): Promise<void> {
   const config = await loadPollConfig(options.config);
   const nowMs = Date.now();
-  const results = await collectAllReports({ providers: config.providers, nowMs });
+  const results = await collectAllReports({ nowMs });
   const card = buildAggregateCard(results, { nowMs });
 
   const notifiers = buildNotifiers(config.channels);
@@ -59,7 +59,7 @@ export function createProgram(): Command {
   const program = new Command();
   program
     .name('usage-report')
-    .description('聚合 Claude/Codex/MiniMax/Z.ai 用量，合并为一张飞书卡片发送到 claude 通道')
+    .description('按 CodexBar 菜单栏配置聚合已启用 LLM 用量，并合并为一张飞书卡片')
     .option('-p, --poll [seconds]', '常驻轮询并推送聚合卡片（无值则用 config.poll.interval_seconds）')
     .option('--notify', '单次发送一张聚合卡片（与 --poll 互斥）')
     .option('-c, --config <path>', '配置文件路径', DEFAULT_CONFIG_PATH)
@@ -87,7 +87,7 @@ export function createProgram(): Command {
 
       // 默认 / --json：collect 并打印（调试，不发送）
       const config = await loadPollConfig(options.config);
-      const results = await collectAllReports({ providers: config.providers, nowMs: Date.now() });
+      const results = await collectAllReports({ nowMs: Date.now() });
       const card = buildAggregateCard(results, { nowMs: Date.now() });
       if (options.json) {
         process.stdout.write(JSON.stringify({ results, card }, null, 2) + '\n');
