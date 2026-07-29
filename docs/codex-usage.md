@@ -79,3 +79,9 @@ codex-usage --poll 300 --config ./local/codex-usage-config.yaml
 ### PM2
 
 `codex-usage` 作为独立 CLI 仍可 `--watch`/`--poll`，但 PM2 已不再单独调度它。仓库现在的 PM2 用量任务统一交给 `usage-report`（聚合 Claude/Codex/MiniMax/Z.ai 一张卡），见 `local/pm2.config.js` 中的 `usage-report-poll` 条目，发送通道复用原 claude-usage 的飞书 claude 通道。
+
+`usage-report` 的 Codex 采集默认调用
+`codexbar usage --format json --provider codex --source cli --all-accounts`，
+因此账号列表、账号凭证和可见性与 CodexBar 配置一致，并会在 Codex 区块逐账号展示。
+运行环境需要能从 `PATH` 找到 `codexbar`。若聚合配置显式设置 `auth_file` 或
+`base_url`，则保留旧的单账号直连模式。

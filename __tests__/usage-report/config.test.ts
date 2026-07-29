@@ -39,6 +39,8 @@ describe('loadPollConfig', () => {
     expect(cfg.channels[0]).toMatchObject({ type: 'feishu', app_id: 'cli_x', receive_id: 'oc_x' });
     expect(cfg.providers.claude.windows).toEqual(['five_hour', 'seven_day']);
     expect(cfg.providers.codex.windows).toEqual(['primary', 'secondary']);
+    expect(cfg.providers.codex.source).toBe('codexbar');
+    expect(cfg.providers.codex.authFile).toBeUndefined();
     expect(cfg.providers.minimax.windows).toEqual(['interval', 'weekly']);
     expect(cfg.providers.zai.windows).toEqual(['primary', 'secondary']);
   });
@@ -159,6 +161,7 @@ providers:
     const cfg = await loadPollConfig(file);
     expect(cfg.providers.codex.authFile).toBe('/tmp/auth.json');
     expect(cfg.providers.codex.baseUrl).toBe('https://example.com/backend-api');
+    expect(cfg.providers.codex.source).toBe('auth-file');
     expect(cfg.providers.minimax.envFile).toBe('/tmp/.env');
     expect(cfg.providers.minimax.apiKeyEnv).toBe('MM_KEY');
     expect(cfg.providers.minimax.apiHost).toBe('https://mm.example.com');

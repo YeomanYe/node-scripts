@@ -23,7 +23,7 @@ const DEFAULTS: AggregateConfig = {
   channels: [],
   providers: {
     claude: { windows: ['five_hour', 'seven_day'] },
-    codex: { windows: ['primary', 'secondary'] },
+    codex: { windows: ['primary', 'secondary'], source: 'codexbar' },
     minimax: { windows: ['interval', 'weekly'] },
     zai: { windows: ['primary', 'secondary'] },
   },
@@ -74,13 +74,17 @@ function validateProviders(raw: unknown): ProviderOverrides {
   const codexRaw = obj['codex'] ?? {};
   const minimaxRaw = obj['minimax'] ?? {};
   const zaiRaw = obj['zai'] ?? {};
+  const codexAuthFile = optString(codexRaw, 'auth_file');
+  const codexBaseUrl = optString(codexRaw, 'base_url');
+  const useLegacyCodexAuth = codexAuthFile !== undefined || codexBaseUrl !== undefined;
 
   return {
     claude: { windows: validateWindows(claudeRaw['windows'], VALID_CLAUDE_WINDOWS, 'claude', DEFAULTS.providers.claude.windows) },
     codex: {
       windows: validateWindows(codexRaw['windows'], VALID_CODEX_WINDOWS, 'codex', DEFAULTS.providers.codex.windows),
-      authFile: optString(codexRaw, 'auth_file') ?? getDefaultAuthPath(),
-      baseUrl: optString(codexRaw, 'base_url'),
+      source: useLegacyCodexAuth ? 'auth-file' : 'codexbar',
+      ...(useLegacyCodexAuth ? { authFile: codexAuthFile ?? getDefaultAuthPath() } : {}),
+      ...(codexBaseUrl ? { baseUrl: codexBaseUrl } : {}),
     },
     minimax: {
       windows: validateWindows(minimaxRaw['windows'], VALID_MINIMAX_WINDOWS, 'minimax', DEFAULTS.providers.minimax.windows),

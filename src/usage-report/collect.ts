@@ -11,6 +11,7 @@ import { readZaiApiKey } from '../zai-usage/env';
 import { fetchZaiUsage } from '../zai-usage/quota';
 import { buildPollReport as buildZaiReport } from '../zai-usage/poll';
 import { PollReportLike, ProviderKey, ProviderOverrides, ProviderResult } from './types';
+import { buildCodexBarPollReport, fetchCodexBarAccountResults } from './codexbar';
 
 /** 测试可注入的 fetcher：返回该 provider 的已构造 PollReport */
 export type ProviderFetcher = () => Promise<PollReportLike>;
@@ -40,8 +41,21 @@ async function defaultClaudeThunk(providers: ProviderOverrides, nowMs: number): 
   });
 }
 
-/** Codex：读 auth.json → getUsageSnapshot → buildPollReport */
+/**
+ * Codex 默认完全委托 CodexBar：
+ * `codexbar usage --format json --provider codex --source cli --all-accounts`。
+ * 因而账号集合、账号切换和凭证来源都与 CodexBar 配置一致。
+ * 只有聚合配置显式包含 auth_file/base_url 时，才保留旧的单账号直连路径。
+ */
 async function defaultCodexThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
+  if (providers.codex.source !== 'auth-file') {
+    const results = await fetchCodexBarAccountResults();
+    return buildCodexBarPollReport(results, {
+      windows: providers.codex.windows,
+      nowMs,
+    });
+  }
+
   const auth = await loadLocalAuth(providers.codex.authFile);
   const snapshot = await getUsageSnapshot({
     accessToken: auth.accessToken,

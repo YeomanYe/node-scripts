@@ -44,7 +44,13 @@ export type ProviderResult = ProviderOk | ProviderError;
 /** 各 provider 在聚合配置中可覆盖的参数 */
 export interface ProviderOverrides {
   claude: { windows: ClaudeAlertWindow[] };
-  codex: { windows: CodexAlertWindow[]; authFile?: string; baseUrl?: string };
+  codex: {
+    windows: CodexAlertWindow[];
+    /** 默认 codexbar；显式配置 auth_file/base_url 时走旧的单账号直连路径 */
+    source?: 'codexbar' | 'auth-file';
+    authFile?: string;
+    baseUrl?: string;
+  };
   minimax: {
     windows: MiniMaxAlertWindow[];
     envFile?: string;
