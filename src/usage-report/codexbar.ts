@@ -1,4 +1,6 @@
 import { execFile } from 'child_process';
+import os from 'os';
+import path from 'path';
 import { z } from 'zod';
 import { CodexAlertWindow } from '../codex-usage/config';
 import { buildPollReport as buildCodexReport } from '../codex-usage/poll';
@@ -17,7 +19,9 @@ export const CODEXBAR_CODEX_USAGE_ARGS = [
 ] as const;
 
 const DEFAULT_TIMEOUT_MS = 40_000;
+const DEFAULT_PREFERENCE_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+const CODEX_WINDOW_ORDER: readonly CodexAlertWindow[] = ['primary', 'secondary'];
 
 const rawWindowSchema = z.object({
   usedPercent: z.number(),
@@ -67,8 +71,16 @@ export interface FetchCodexBarOptions {
   runner?: CodexBarRunner;
 }
 
+export interface ReadCodexBarMetricPreferenceOptions {
+  command?: string;
+  plistPath?: string;
+  timeoutMs?: number;
+  runner?: CodexBarRunner;
+}
+
 export interface BuildCodexBarReportOptions {
   windows: CodexAlertWindow[];
+  metricPreference?: string;
   nowMs: number;
 }
 
@@ -190,7 +202,7 @@ function formatExecError(
   return new Error(`CodexBar CLI 执行失败${code}`);
 }
 
-const defaultRunner: CodexBarRunner = (command, args, timeoutMs) =>
+const runTextCommand: CodexBarRunner = (command, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     execFile(
       command,
@@ -202,13 +214,29 @@ const defaultRunner: CodexBarRunner = (command, args, timeoutMs) =>
       },
       (error, stdout) => {
         if (error) {
-          reject(formatExecError(error, command, timeoutMs));
+          reject(error);
           return;
         }
         resolve(stdout);
       }
     );
   });
+
+const defaultRunner: CodexBarRunner = async (command, args, timeoutMs) => {
+  try {
+    return await runTextCommand(command, args, timeoutMs);
+  } catch (error: unknown) {
+    throw formatExecError(
+      error as {
+        code?: string | number | null;
+        killed?: boolean;
+        signal?: NodeJS.Signals | null;
+      },
+      command,
+      timeoutMs
+    );
+  }
+};
 
 export async function fetchCodexBarAccountResults(
   options: FetchCodexBarOptions = {}
@@ -220,11 +248,64 @@ export async function fetchCodexBarAccountResults(
   return parseCodexBarAccountResults(stdout);
 }
 
+export async function readCodexBarMetricPreference(
+  options: ReadCodexBarMetricPreferenceOptions = {}
+): Promise<string | undefined> {
+  const command = options.command ?? 'plutil';
+  const plistPath =
+    options.plistPath ??
+    path.join(os.homedir(), 'Library', 'Preferences', 'com.steipete.codexbar.plist');
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PREFERENCE_TIMEOUT_MS;
+  const runner = options.runner ?? runTextCommand;
+
+  try {
+    const stdout = await runner(
+      command,
+      ['-extract', 'menuBarMetricPreferences', 'json', '-o', '-', plistPath],
+      timeoutMs
+    );
+    const json: unknown = JSON.parse(stdout);
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return undefined;
+    const preference = (json as Record<string, unknown>)['codex'];
+    if (typeof preference !== 'string' || preference.trim().length === 0) return undefined;
+    return preference.trim();
+  } catch {
+    return undefined;
+  }
+}
+
 function reportBody(content: string): string {
   const firstLineEnd = content.indexOf('\n');
   if (firstLineEnd < 0) return '';
   const body = content.slice(firstLineEnd + 1);
   return body.startsWith('\n') ? body.slice(1) : body;
+}
+
+function resolveReportWindows(
+  snapshot: UsageSnapshot,
+  fallbackWindows: CodexAlertWindow[],
+  metricPreference: string | undefined
+): CodexAlertWindow[] {
+  if (!metricPreference) return fallbackWindows;
+
+  const candidates =
+    metricPreference === 'carousel'
+      ? CODEX_WINDOW_ORDER
+      : [
+          metricPreference,
+          ...CODEX_WINDOW_ORDER.filter((window) => window !== metricPreference),
+        ];
+
+  for (const candidate of candidates) {
+    if (candidate === 'primary' && snapshot.primary) return ['primary'];
+    if (candidate === 'secondary' && snapshot.secondary) return ['secondary'];
+  }
+  return [];
+}
+
+function formatMetricPreference(preference: string): string {
+  if (preference === 'carousel') return 'Carousel';
+  return preference.charAt(0).toUpperCase() + preference.slice(1);
 }
 
 export function buildCodexBarPollReport(
@@ -235,7 +316,17 @@ export function buildCodexBarPollReport(
 
   results.forEach((result, index) => {
     if (result.status === 'ok') {
-      reports.set(index, buildCodexReport(result.snapshot, options));
+      reports.set(
+        index,
+        buildCodexReport(result.snapshot, {
+          windows: resolveReportWindows(
+            result.snapshot,
+            options.windows,
+            options.metricPreference
+          ),
+          nowMs: options.nowMs,
+        })
+      );
     }
   });
 
@@ -266,14 +357,26 @@ export function buildCodexBarPollReport(
     return body ? `${header}\n${body}` : header;
   });
 
-  const content = [`**账号数**：${results.length}`, '', blocks.join('\n\n')].join('\n');
+  const preferenceLabel = options.metricPreference
+    ? ` ｜ **CodexBar 配额偏好**：${formatMetricPreference(options.metricPreference)}`
+    : '';
+  const content = [
+    `**账号数**：${results.length}${preferenceLabel}`,
+    '',
+    blocks.join('\n\n'),
+  ].join('\n');
   const accountSummaries = results.map((result, index) => {
     if (result.status === 'error') {
       return `${result.accountLabel}[ERROR:${result.message}]`;
     }
     return `${result.accountLabel}[${reports.get(index)?.summaryLine ?? 'no-usage'}]`;
   });
-  const summaryLine = `accounts=${results.length} ${accountSummaries.join(' ')} alert=${level === 'warn'}`;
+  const preferenceSummary = options.metricPreference
+    ? ` preference=${options.metricPreference}`
+    : '';
+  const summaryLine =
+    `accounts=${results.length}${preferenceSummary} ` +
+    `${accountSummaries.join(' ')} alert=${level === 'warn'}`;
 
   return { title, content, level, summaryLine };
 }

@@ -3,6 +3,7 @@ import {
   buildCodexBarPollReport,
   fetchCodexBarAccountResults,
   parseCodexBarAccountResults,
+  readCodexBarMetricPreference,
 } from '@/usage-report/codexbar';
 
 const NOW_SEC = 1_800_000_000;
@@ -35,6 +36,52 @@ function codexEntry(
 }
 
 describe('usage-report CodexBar multi-account collection', () => {
+  it('reads the Codex metric preference from the same CodexBar plist key as ty-vibe-kanban', async () => {
+    const calls: Array<{ command: string; args: readonly string[]; timeoutMs: number }> = [];
+    const preference = await readCodexBarMetricPreference({
+      plistPath: '/tmp/com.steipete.codexbar.plist',
+      runner: async (command, args, timeoutMs) => {
+        calls.push({ command, args, timeoutMs });
+        return JSON.stringify({
+          claude: 'secondary',
+          codex: 'primary',
+        });
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        command: 'plutil',
+        args: [
+          '-extract',
+          'menuBarMetricPreferences',
+          'json',
+          '-o',
+          '-',
+          '/tmp/com.steipete.codexbar.plist',
+        ],
+        timeoutMs: 5_000,
+      },
+    ]);
+    expect(preference).toBe('primary');
+  });
+
+  it('treats an unreadable or malformed CodexBar metric preference as unavailable', async () => {
+    await expect(
+      readCodexBarMetricPreference({
+        runner: async () => {
+          throw new Error('plist unavailable');
+        },
+      })
+    ).resolves.toBeUndefined();
+
+    await expect(
+      readCodexBarMetricPreference({
+        runner: async () => JSON.stringify({ codex: 123 }),
+      })
+    ).resolves.toBeUndefined();
+  });
+
   it('uses the same CodexBar CLI arguments as ty-vibe-kanban and parses every account', async () => {
     const calls: Array<{ command: string; args: readonly string[]; timeoutMs: number }> = [];
     const stdout = JSON.stringify([
@@ -116,17 +163,78 @@ describe('usage-report CodexBar multi-account collection', () => {
 
     const report = buildCodexBarPollReport(results, {
       windows: ['primary', 'secondary'],
+      metricPreference: 'primary',
       nowMs: NOW_MS,
     });
 
     expect(report.level).toBe('warn');
-    expect(report.content).toContain('**账号数**：2');
+    expect(report.content).toContain('**账号数**：2 ｜ **CodexBar 配额偏好**：Primary');
     expect(report.content).toContain('**账号**：alice ｜ **Plan**：pro');
     expect(report.content).toContain('Secondary：80.0%');
     expect(report.content).toContain('**账号**：very-long-… ｜ **Plan**：plus');
     expect(report.content).toContain('Primary：10.0%');
     expect(report.summaryLine).toContain('alice[');
     expect(report.summaryLine).toContain('very-long-…[');
+    expect(report.summaryLine).toContain('preference=primary');
+  });
+
+  it('uses only the preferred CodexBar quota for display and alerting when it is available', () => {
+    const results = parseCodexBarAccountResults(
+      JSON.stringify([
+        codexEntry('alice@example.com', {
+          primary: {
+            usedPercent: 10,
+            windowMinutes: 300,
+            resetsAt: new Date((NOW_SEC + 150 * 60) * 1000).toISOString(),
+          },
+          secondary: {
+            usedPercent: 80,
+            windowMinutes: 10_080,
+            resetsAt: new Date((NOW_SEC + 5_040 * 60) * 1000).toISOString(),
+          },
+        }),
+      ])
+    );
+
+    const report = buildCodexBarPollReport(results, {
+      windows: ['primary', 'secondary'],
+      metricPreference: 'primary',
+      nowMs: NOW_MS,
+    });
+
+    expect(report.level).toBe('info');
+    expect(report.content).toContain('Primary：10.0%');
+    expect(report.content).not.toContain('Secondary：80.0%');
+    expect(report.summaryLine).toContain('primary=10.0%');
+    expect(report.summaryLine).not.toContain('secondary=80.0%');
+  });
+
+  it('matches CodexBar carousel behavior by resolving the first available quota', () => {
+    const results = parseCodexBarAccountResults(
+      JSON.stringify([
+        codexEntry('alice@example.com', {
+          primary: {
+            usedPercent: 10,
+            windowMinutes: 300,
+            resetsAt: new Date((NOW_SEC + 150 * 60) * 1000).toISOString(),
+          },
+          secondary: {
+            usedPercent: 80,
+            windowMinutes: 10_080,
+            resetsAt: new Date((NOW_SEC + 5_040 * 60) * 1000).toISOString(),
+          },
+        }),
+      ])
+    );
+
+    const report = buildCodexBarPollReport(results, {
+      windows: ['primary', 'secondary'],
+      metricPreference: 'carousel',
+      nowMs: NOW_MS,
+    });
+
+    expect(report.content).toContain('Primary：10.0%');
+    expect(report.content).not.toContain('Secondary：80.0%');
   });
 
   it('keeps a per-account error visible when another account succeeds', () => {

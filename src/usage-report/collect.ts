@@ -11,7 +11,11 @@ import { readZaiApiKey } from '../zai-usage/env';
 import { fetchZaiUsage } from '../zai-usage/quota';
 import { buildPollReport as buildZaiReport } from '../zai-usage/poll';
 import { PollReportLike, ProviderKey, ProviderOverrides, ProviderResult } from './types';
-import { buildCodexBarPollReport, fetchCodexBarAccountResults } from './codexbar';
+import {
+  buildCodexBarPollReport,
+  fetchCodexBarAccountResults,
+  readCodexBarMetricPreference,
+} from './codexbar';
 
 /** 测试可注入的 fetcher：返回该 provider 的已构造 PollReport */
 export type ProviderFetcher = () => Promise<PollReportLike>;
@@ -49,9 +53,13 @@ async function defaultClaudeThunk(providers: ProviderOverrides, nowMs: number): 
  */
 async function defaultCodexThunk(providers: ProviderOverrides, nowMs: number): Promise<PollReportLike> {
   if (providers.codex.source !== 'auth-file') {
-    const results = await fetchCodexBarAccountResults();
+    const [results, metricPreference] = await Promise.all([
+      fetchCodexBarAccountResults(),
+      readCodexBarMetricPreference(),
+    ]);
     return buildCodexBarPollReport(results, {
       windows: providers.codex.windows,
+      metricPreference,
       nowMs,
     });
   }

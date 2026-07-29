@@ -83,5 +83,10 @@ codex-usage --poll 300 --config ./local/codex-usage-config.yaml
 `usage-report` 的 Codex 采集默认调用
 `codexbar usage --format json --provider codex --source cli --all-accounts`，
 因此账号列表、账号凭证和可见性与 CodexBar 配置一致，并会在 Codex 区块逐账号展示。
+推送展示和告警判定使用
+`~/Library/Preferences/com.steipete.codexbar.plist` 中
+`menuBarMetricPreferences.codex` 配置的配额窗口；若某个账号没有该窗口，则与
+`ty-vibe-kanban` 一样回退到该账号实际可用的窗口。读取不到 CodexBar 偏好时，
+才回退到聚合配置中的 `providers.codex.windows`。
 运行环境需要能从 `PATH` 找到 `codexbar`。若聚合配置显式设置 `auth_file` 或
 `base_url`，则保留旧的单账号直连模式。
